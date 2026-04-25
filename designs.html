@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>机器人设计选择</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;background:linear-gradient(135deg,#F0FDF4,#F8FAFC,#ECFDF5);min-height:100vh;color:#111}
+.page{max-width:900px;margin:0 auto;padding:36px 16px}
+h1{text-align:center;font-size:1.6rem;color:#15803D;font-weight:800;margin-bottom:6px}
+.sub{text-align:center;color:#6B7280;font-size:.9rem;margin-bottom:36px}
+
+/* Cards row */
+.row{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.card{background:#fff;border-radius:20px;padding:28px 18px 22px;box-shadow:0 2px 16px rgba(0,0,0,.07);border:2px solid transparent;transition:border-color .2s,box-shadow .2s;display:flex;flex-direction:column;align-items:center;gap:14px;cursor:pointer}
+.card:hover{border-color:#22C55E;box-shadow:0 4px 24px rgba(34,197,94,.15)}
+.card.selected{border-color:#16A34A;box-shadow:0 4px 28px rgba(22,163,74,.25);background:#F0FDF4}
+.card-name{font-size:1.1rem;font-weight:800;color:#15803D}
+.card-desc{font-size:.78rem;color:#6B7280;text-align:center;line-height:1.5}
+.demo-btn{padding:9px 22px;border:none;border-radius:50px;background:linear-gradient(90deg,#16A34A,#22C55E);color:#fff;font-size:.85rem;font-weight:700;cursor:pointer;font-family:inherit;transition:transform .15s;margin-top:4px}
+.demo-btn:hover{transform:translateY(-2px)}
+.demo-btn:active{transform:scale(.96)}
+.label{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.72rem;font-weight:700}
+.label-a{background:#FEF3C7;color:#92400E}
+.label-b{background:#EFF6FF;color:#1D4ED8}
+.label-c{background:#FDF2F8;color:#9D174D}
+
+/* Stage area for each robot */
+.stage{width:100px;height:150px;display:flex;align-items:flex-end;justify-content:center;position:relative}
+
+/* ===================================================
+   DESIGN A: "小黄" — Round kawaii, big eyes, waving arms
+   =================================================== */
+@keyframes aFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+@keyframes aBlink{0%,82%,100%{transform:scaleY(1)}88%{transform:scaleY(0.07)}}
+@keyframes aArmLIdle{0%,100%{transform:rotate(-10deg)}50%{transform:rotate(5deg)}}
+@keyframes aArmRIdle{0%,100%{transform:rotate(10deg)}50%{transform:rotate(-5deg)}}
+@keyframes aArmLTalk{0%,100%{transform:rotate(-35deg)}50%{transform:rotate(25deg)}}
+@keyframes aArmRTalk{0%,100%{transform:rotate(35deg)}50%{transform:rotate(-25deg)}}
+@keyframes aBodyBob{0%,100%{transform:translateY(0) scale(1)}40%{transform:translateY(-7px) scale(1.03)}70%{transform:translateY(-3px) scale(.98)}}
+@keyframes aEyeHappy{0%,100%{transform:scaleY(1)}50%{transform:scaleY(.55)}}
+@keyframes aSmileTalk{0%,100%{height:9px}50%{height:15px;width:22px}}
+
+.a-wrap{width:86px;height:140px;position:relative;animation:aFloat 3s ease-in-out infinite}
+/* Feet */
+.a-feet{position:absolute;bottom:0;left:50%;transform:translateX(-50%);display:flex;gap:10px}
+.a-foot{width:22px;height:11px;background:#E6A800;border-radius:50%;border:2px solid #C88A00}
+/* Body */
+.a-body{position:absolute;bottom:9px;left:11px;width:64px;height:46px;background:radial-gradient(ellipse at 42% 35%,#FFE84A,#FFC200);border-radius:28px;border:2.5px solid #D4A000;box-shadow:inset 0 2px 0 rgba(255,255,255,.3),0 4px 12px rgba(255,194,0,.3)}
+/* Belly shine */
+.a-shine{position:absolute;top:8px;left:12px;width:18px;height:10px;background:rgba(255,255,255,.35);border-radius:50%;transform:rotate(-20deg)}
+/* Head */
+.a-head{position:absolute;bottom:48px;left:5px;width:76px;height:62px;background:radial-gradient(ellipse at 42% 38%,#FFE84A,#FFC200);border-radius:50%;border:2.5px solid #D4A000;box-shadow:inset 0 2px 0 rgba(255,255,255,.3)}
+/* Arms */
+.a-arm{position:absolute;bottom:55px;width:18px;height:38px;background:radial-gradient(ellipse at 50% 30%,#FFE84A,#FFC200);border-radius:12px;border:2.5px solid #D4A000}
+.a-arm.l{left:-8px;transform-origin:top center;animation:aArmLIdle 2.5s ease-in-out infinite}
+.a-arm.r{right:-8px;transform-origin:top center;animation:aArmRIdle 2.5s ease-in-out infinite .5s}
+/* Hands */
+.a-hand{position:absolute;bottom:-9px;left:50%;transform:translateX(-50%);width:16px;height:16px;background:#FFC200;border-radius:50%;border:2px solid #D4A000}
+/* Cheeks */
+.a-cheeks{position:absolute;top:36px;left:50%;transform:translateX(-50%);display:flex;gap:36px}
+.a-cheek{width:14px;height:8px;background:rgba(255,120,80,.4);border-radius:50%}
+/* Eyes */
+.a-eyes{position:absolute;top:16px;left:50%;transform:translateX(-50%);display:flex;gap:14px;animation:aBlink 5s ease-in-out infinite}
+.a-eye{width:22px;height:22px;background:#fff;border-radius:50%;border:2.5px solid #222;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 4px rgba(0,0,0,.15)}
+.a-pupil{width:14px;height:14px;background:#1A1A1A;border-radius:50%;position:relative}
+.a-pupil::after{content:'';width:5px;height:5px;background:#fff;border-radius:50%;position:absolute;top:1px;right:1px}
+.a-pupil::before{content:'';width:3px;height:3px;background:rgba(255,255,255,.5);border-radius:50%;position:absolute;bottom:2px;left:2px}
+/* Smile */
+.a-mouth{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);width:20px;height:9px;border-bottom:3px solid #333;border-radius:0 0 20px 20px}
+/* Ear nubs */
+.a-ear{position:absolute;top:14px;width:12px;height:12px;background:#FFC200;border-radius:50%;border:2px solid #D4A000}
+.a-ear.l{left:-3px}
+.a-ear.r{right:-3px}
+
+/* TALKING state - Design A */
+.a-wrap.talking .a-arm.l{animation:aArmLTalk .45s ease-in-out infinite!important}
+.a-wrap.talking .a-arm.r{animation:aArmRTalk .45s ease-in-out infinite .22s!important}
+.a-wrap.talking .a-body{animation:aBodyBob .4s ease-in-out infinite}
+.a-wrap.talking .a-eyes{animation:aEyeHappy .6s ease-in-out infinite!important}
+.a-wrap.talking .a-mouth{animation:aSmileTalk .2s ease-in-out infinite}
+
+/* ===================================================
+   DESIGN B: "小闪" — WALL-E style, arm joints, gesture
+   =================================================== */
+@keyframes bFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+@keyframes bBlink{0%,80%,100%{transform:scaleY(1)}87%{transform:scaleY(0.06)}}
+@keyframes bEyeTilt{0%,60%,100%{transform:rotate(0) translateX(-50%)}72%{transform:rotate(-22deg) translateX(-50%)}84%{transform:rotate(16deg) translateX(-50%)}}
+@keyframes bArmLIdle{0%,100%{transform:rotate(-15deg)}50%{transform:rotate(-5deg)}}
+@keyframes bArmRIdle{0%,100%{transform:rotate(15deg)}50%{transform:rotate(5deg)}}
+@keyframes bArmLPoint{0%{transform:rotate(-80deg)}30%{transform:rotate(-30deg)}60%{transform:rotate(-60deg)}100%{transform:rotate(-80deg)}}
+@keyframes bArmRWave{0%,100%{transform:rotate(20deg)}50%{transform:rotate(-20deg)}}
+@keyframes bHeadNod{0%,100%{transform:rotate(0)}50%{transform:rotate(-10deg)}}
+@keyframes bLedBlink{0%,100%{opacity:1}50%{opacity:.15}}
+@keyframes bTrackRoll{0%{background-position:0 0}100%{background-position:-20px 0}}
+
+.b-wrap{width:90px;height:140px;position:relative;animation:bFloat 3.2s ease-in-out infinite}
+/* Tracks */
+.b-track{position:absolute;bottom:0;left:1px;width:88px;height:17px;background:#1E1E1E;border-radius:8px;overflow:hidden}
+.b-track::before{content:'';position:absolute;top:4px;left:5px;right:5px;height:9px;background:repeating-linear-gradient(90deg,#2C2C2C 0,#2C2C2C 10px,#111 10px,#111 20px);border-radius:4px;animation:bTrackRoll .8s linear infinite paused}
+.b-tw{position:absolute;top:50%;transform:translateY(-50%);width:11px;height:11px;background:#2E2E2E;border-radius:50%;border:1.5px solid #444}
+.b-tw.l{left:7px}.b-tw.r{right:7px}
+/* Body */
+.b-body{position:absolute;bottom:15px;left:8px;width:74px;height:50px;background:linear-gradient(150deg,#FFE040,#FFC107,#E6A800);border-radius:7px;border:2.5px solid #C88A00;box-shadow:inset 0 2px 0 rgba(255,255,255,.2)}
+.b-body::before{content:'';position:absolute;top:50%;left:6px;right:6px;height:1px;background:rgba(0,0,0,.15)}
+/* Chest panel */
+.b-panel{position:absolute;top:8px;left:50%;transform:translateX(-50%);width:46px;height:20px;background:#111;border-radius:4px;border:1.5px solid #FFD700;display:flex;align-items:center;justify-content:center;gap:7px}
+.b-led{width:9px;height:9px;border-radius:50%}
+.b-led.r{background:#E74C3C;box-shadow:0 0 5px #E74C3C;animation:bLedBlink 1.4s ease-in-out infinite}
+.b-led.g{background:#2ECC71;box-shadow:0 0 5px #2ECC71;animation:bLedBlink 2s ease-in-out infinite .6s}
+/* Head */
+.b-head{position:absolute;bottom:63px;left:10px;width:70px;height:40px;background:linear-gradient(145deg,#FFE040,#FFC107);border-radius:7px;border:2.5px solid #C88A00;box-shadow:inset 0 2px 0 rgba(255,255,255,.18);overflow:visible}
+.b-head::after{content:'';position:absolute;bottom:8px;left:8px;right:8px;height:1px;background:rgba(0,0,0,.15)}
+.b-rv{position:absolute;width:5px;height:5px;background:#B8860B;border-radius:50%;top:4px}
+.b-rv.l{left:5px}.b-rv.r{right:5px}
+/* WALL-E binocular eyes */
+.b-eyes{position:absolute;top:-30px;left:50%;transform:translateX(-50%);display:flex;gap:4px;transform-origin:50% 100%;animation:bEyeTilt 6s ease-in-out infinite 2s}
+.b-ebridge{position:absolute;bottom:3px;left:50%;transform:translateX(-50%);width:52px;height:5px;background:#2A2A2A;border-radius:2px;z-index:0}
+.b-eye{width:30px;height:30px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#555,#1A1A1A);border:3px solid #3A3A3A;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(0,0,0,.5);position:relative;z-index:1}
+.b-iris{width:21px;height:21px;border-radius:50%;background:#060E17;display:flex;align-items:center;justify-content:center;animation:bBlink 5s ease-in-out infinite}
+.b-lens{width:14px;height:14px;border-radius:50%;background:radial-gradient(circle at 32% 28%,#D4EEFA,#4AADDC 45%,#0F5A8A 85%,#062840);box-shadow:0 0 8px rgba(74,173,220,.5);position:relative}
+.b-lens::after{content:'';position:absolute;width:4px;height:4px;background:rgba(255,255,255,.9);border-radius:50%;top:2px;right:2px}
+/* Speaker grille bottom of head */
+.b-grille{position:absolute;bottom:3px;left:50%;transform:translateX(-50%);display:flex;gap:3px;align-items:flex-end}
+.b-bar{width:3px;background:rgba(0,0,0,.3);border-radius:1px;min-height:2px;transition:height .09s}
+/* Arms */
+.b-arm{position:absolute;bottom:72px;width:12px}
+.b-arm.l{left:-4px;transform-origin:top right;animation:bArmLIdle 3s ease-in-out infinite}
+.b-arm.r{right:-4px;transform-origin:top left;animation:bArmRIdle 3s ease-in-out infinite .8s}
+.b-upper,.b-lower{width:12px;height:18px;background:linear-gradient(#FFE040,#FFC107);border-radius:6px;border:2px solid #C88A00;position:absolute}
+.b-upper{top:0}
+.b-lower{top:16px}
+.b-claw{position:absolute;top:32px;display:flex;gap:2px}
+.b-cf,.b-cb{width:7px;height:9px;background:#C88A00;border-radius:3px;border:1px solid #A87000}
+.b-cf{transform:rotate(-20deg);transform-origin:bottom}
+.b-cb{transform:rotate(20deg);transform-origin:bottom}
+
+/* TALKING - Design B */
+.b-wrap.talking .b-arm.l{animation:bArmLPoint .5s ease-in-out infinite!important}
+.b-wrap.talking .b-arm.r{animation:bArmRWave .4s ease-in-out infinite .2s!important}
+.b-wrap.talking .b-head{animation:bHeadNod .6s ease-in-out infinite}
+
+/* ===================================================
+   DESIGN C: "汤圆" — Marshmallow, heart antenna, floppy arms
+   =================================================== */
+@keyframes cFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+@keyframes cBlink{0%,80%,100%{transform:scaleY(1)}87%{transform:scaleY(0.07)}}
+@keyframes cArmLIdle{0%,100%{transform:rotate(12deg)}50%{transform:rotate(-5deg)}}
+@keyframes cArmRIdle{0%,100%{transform:rotate(-12deg)}50%{transform:rotate(5deg)}}
+@keyframes cArmLFlap{0%,100%{transform:rotate(-45deg)}50%{transform:rotate(30deg)}}
+@keyframes cArmRFlap{0%,100%{transform:rotate(45deg)}50%{transform:rotate(-30deg)}}
+@keyframes cBodyWiggle{0%,100%{transform:rotate(0) scaleX(1)}25%{transform:rotate(-4deg) scaleX(.97)}75%{transform:rotate(4deg) scaleX(.97)}}
+@keyframes cHeadBob{0%,100%{transform:translateY(0) rotate(0)}40%{transform:translateY(-6px) rotate(-5deg)}70%{transform:translateY(-2px) rotate(3deg)}}
+@keyframes cHeartPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.25)}}
+@keyframes cEyeStar{0%,100%{transform:scale(1)}50%{transform:scale(1.18)}}
+@keyframes cMouthTalk{0%,100%{height:8px;border-radius:0 0 15px 15px}50%{height:14px;width:24px;border-bottom-width:4px}}
+
+.c-wrap{width:88px;height:145px;position:relative;animation:cFloat 3s ease-in-out infinite}
+/* Feet */
+.c-feet{position:absolute;bottom:0;left:50%;transform:translateX(-50%);display:flex;gap:14px}
+.c-foot{width:24px;height:13px;background:#E6B800;border-radius:50%;border:2.5px solid #C89800}
+/* Body - marshmallow */
+.c-body{position:absolute;bottom:11px;left:10px;width:68px;height:50px;background:radial-gradient(ellipse at 42% 30%,#FFEF44,#FFD200);border-radius:34px;border:2.5px solid #D4B000;box-shadow:inset 0 2px 0 rgba(255,255,255,.35)}
+/* Belly star */
+.c-belly{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:18px;opacity:.25;filter:saturate(0)}
+/* Arms - floppy */
+.c-arm{position:absolute;bottom:22px;width:20px;height:36px;background:radial-gradient(ellipse at 50% 25%,#FFEF44,#FFD200);border-radius:16px;border:2.5px solid #D4B000;box-shadow:inset 0 1px 0 rgba(255,255,255,.3)}
+.c-arm.l{left:-8px;transform-origin:top center;animation:cArmLIdle 2.8s ease-in-out infinite}
+.c-arm.r{right:-8px;transform-origin:top center;animation:cArmRIdle 2.8s ease-in-out infinite .6s}
+.c-hnd{position:absolute;bottom:-9px;left:50%;transform:translateX(-50%);width:17px;height:17px;background:#FFD200;border-radius:50%;border:2px solid #C89800}
+/* Head - big round */
+.c-head{position:absolute;bottom:54px;left:4px;width:80px;height:66px;background:radial-gradient(ellipse at 42% 38%,#FFEF44,#FFD200);border-radius:50%;border:2.5px solid #D4B000;box-shadow:inset 0 2px 0 rgba(255,255,255,.3)}
+/* Heart antenna */
+.c-ant{position:absolute;top:-22px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center}
+.c-stick{width:3px;height:14px;background:#FF8FAB;border-radius:2px}
+.c-heart{position:relative;width:16px;height:14px;animation:cHeartPulse 1.5s ease-in-out infinite}
+.c-heart::before,.c-heart::after{content:'';position:absolute;width:9px;height:12px;background:#FF4D79;border-radius:9px 9px 0 0;top:0}
+.c-heart::before{left:0;transform:rotate(-45deg);transform-origin:0 100%}
+.c-heart::after{right:0;transform:rotate(45deg);transform-origin:100% 100%}
+/* Big eyes */
+.c-eyes{position:absolute;top:14px;left:50%;transform:translateX(-50%);display:flex;gap:16px;animation:cBlink 5s ease-in-out infinite}
+.c-eye{width:24px;height:24px;background:#fff;border-radius:50%;border:2.5px solid #222;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 5px rgba(0,0,0,.15)}
+.c-pupil{width:15px;height:15px;background:#1A1A1A;border-radius:50%;position:relative}
+.c-pupil::after{content:'';width:5px;height:5px;background:#fff;border-radius:50%;position:absolute;top:1px;right:1px}
+.c-pupil::before{content:'';width:3px;height:3px;background:rgba(255,255,255,.55);border-radius:50%;position:absolute;bottom:2px;left:2px}
+/* Chubby cheeks */
+.c-cheeks{position:absolute;top:34px;left:50%;transform:translateX(-50%);display:flex;gap:40px}
+.c-cheek{width:15px;height:9px;background:rgba(255,100,100,.42);border-radius:50%}
+/* Smile */
+.c-mouth{position:absolute;bottom:11px;left:50%;transform:translateX(-50%);width:22px;height:8px;border-bottom:3px solid #333;border-radius:0 0 20px 20px}
+
+/* TALKING - Design C */
+.c-wrap.talking .c-arm.l{animation:cArmLFlap .38s ease-in-out infinite!important}
+.c-wrap.talking .c-arm.r{animation:cArmRFlap .38s ease-in-out infinite .19s!important}
+.c-wrap.talking .c-body{animation:cBodyWiggle .45s ease-in-out infinite}
+.c-wrap.talking .c-head{animation:cHeadBob .45s ease-in-out infinite}
+.c-wrap.talking .c-eye{animation:cEyeStar .7s ease-in-out infinite!important}
+.c-wrap.talking .c-mouth{animation:cMouthTalk .2s ease-in-out infinite}
+
+/* ===== Page layout ===== */
+@media(max-width:640px){
+  .row{grid-template-columns:1fr;gap:16px}
+}
+.footer{text-align:center;margin-top:32px;color:#6B7280;font-size:.82rem;padding-bottom:20px}
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>选择你的助手机器人</h1>
+  <p class="sub">点击「看说话效果」预览动作，选好后告诉我 A / B / C</p>
+
+  <div class="row">
+
+    <!-- Design A -->
+    <div class="card" id="card-a">
+      <div class="card-name">A · 小黄</div>
+      <span class="label label-a">圆润 · 超可爱</span>
+      <div class="stage">
+        <div class="a-wrap" id="robot-a">
+          <div class="a-head">
+            <div class="a-ear l"></div><div class="a-ear r"></div>
+            <div class="a-eyes">
+              <div class="a-eye"><div class="a-pupil"></div></div>
+              <div class="a-eye"><div class="a-pupil"></div></div>
+            </div>
+            <div class="a-cheeks"><div class="a-cheek"></div><div class="a-cheek"></div></div>
+            <div class="a-mouth"></div>
+          </div>
+          <div class="a-body">
+            <div class="a-shine"></div>
+          </div>
+          <div class="a-arm l"><div class="a-hand"></div></div>
+          <div class="a-arm r"><div class="a-hand"></div></div>
+          <div class="a-feet"><div class="a-foot"></div><div class="a-foot"></div></div>
+        </div>
+      </div>
+      <div class="card-desc">圆滚滚的身体，大眼睛<br>双手一起摇摆，活泼可爱</div>
+      <button class="demo-btn" onclick="demo('a')">看说话效果 ▶</button>
+    </div>
+
+    <!-- Design B -->
+    <div class="card" id="card-b">
+      <div class="card-name">B · 小闪</div>
+      <span class="label label-b">机甲 · WALL-E风</span>
+      <div class="stage">
+        <div class="b-wrap" id="robot-b">
+          <div class="b-track">
+            <div class="b-tw l"></div><div class="b-tw r"></div>
+          </div>
+          <div class="b-body">
+            <div class="b-panel"><div class="b-led r"></div><div class="b-led g"></div></div>
+          </div>
+          <div class="b-arm l">
+            <div class="b-upper"></div><div class="b-lower"></div>
+            <div class="b-claw"><div class="b-cf"></div><div class="b-cb"></div></div>
+          </div>
+          <div class="b-arm r">
+            <div class="b-upper"></div><div class="b-lower"></div>
+            <div class="b-claw"><div class="b-cf"></div><div class="b-cb"></div></div>
+          </div>
+          <div class="b-head">
+            <div class="b-rv l"></div><div class="b-rv r"></div>
+            <div class="b-eyes">
+              <div class="b-ebridge"></div>
+              <div class="b-eye"><div class="b-iris"><div class="b-lens"></div></div></div>
+              <div class="b-eye"><div class="b-iris"><div class="b-lens"></div></div></div>
+            </div>
+            <div class="b-grille" id="b-grille">
+              <div class="b-bar" style="height:2px"></div>
+              <div class="b-bar" style="height:4px"></div>
+              <div class="b-bar" style="height:3px"></div>
+              <div class="b-bar" style="height:5px"></div>
+              <div class="b-bar" style="height:2px"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card-desc">望远镜大眼，机械臂爪<br>一手指向一手挥动，霸气</div>
+      <button class="demo-btn" onclick="demo('b')">看说话效果 ▶</button>
+    </div>
+
+    <!-- Design C -->
+    <div class="card" id="card-c">
+      <div class="card-name">C · 汤圆</div>
+      <span class="label label-c">软萌 · 最可爱</span>
+      <div class="stage">
+        <div class="c-wrap" id="robot-c">
+          <div class="c-feet"><div class="c-foot"></div><div class="c-foot"></div></div>
+          <div class="c-body"><div class="c-belly">★</div></div>
+          <div class="c-arm l"><div class="c-hnd"></div></div>
+          <div class="c-arm r"><div class="c-hnd"></div></div>
+          <div class="c-head">
+            <div class="c-ant">
+              <div class="c-heart"></div>
+              <div class="c-stick"></div>
+            </div>
+            <div class="c-eyes">
+              <div class="c-eye"><div class="c-pupil"></div></div>
+              <div class="c-eye"><div class="c-pupil"></div></div>
+            </div>
+            <div class="c-cheeks"><div class="c-cheek"></div><div class="c-cheek"></div></div>
+            <div class="c-mouth"></div>
+          </div>
+        </div>
+      </div>
+      <div class="card-desc">心形天线，双臂疯狂扑扇<br>全身扭动，萌到爆炸</div>
+      <button class="demo-btn" onclick="demo('c')">看说话效果 ▶</button>
+    </div>
+
+  </div>
+
+  <p class="footer">选好后告诉我 A、B 或 C，我马上换上去 ✨</p>
+</div>
+
+<script>
+const timers = {};
+function demo(id) {
+  // Stop any running demos
+  ['a','b','c'].forEach(x => {
+    clearTimeout(timers[x]);
+    const el = document.getElementById('robot-'+x);
+    if(el) el.classList.remove('talking');
+    const card = document.getElementById('card-'+x);
+    if(card) card.classList.remove('selected');
+    // Pause track animation
+    if(x==='b') {
+      const track = el?.querySelector('.b-track::before');
+    }
+  });
+
+  const robot = document.getElementById('robot-'+id);
+  const card = document.getElementById('card-'+id);
+  if(!robot) return;
+  card.classList.add('selected');
+  robot.classList.add('talking');
+
+  // Animate B grille bars
+  let barTimer;
+  if(id==='b') {
+    const bars = document.querySelectorAll('.b-bar');
+    barTimer = setInterval(()=>{
+      bars.forEach(b => b.style.height = (Math.floor(Math.random()*7)+2)+'px');
+    }, 120);
+  }
+
+  // Play beeps
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const beep = (f,d,t) => {
+      const o=ctx.createOscillator(), g=ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.type='sine'; o.frequency.value=f;
+      g.gain.setValueAtTime(0,ctx.currentTime+t);
+      g.gain.linearRampToValueAtTime(.15,ctx.currentTime+t+.01);
+      g.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+t+d);
+      o.start(ctx.currentTime+t); o.stop(ctx.currentTime+t+d+.05);
+    };
+    beep(440,.1,0); beep(587,.1,.14); beep(880,.2,.28);
+  } catch(e){}
+
+  timers[id] = setTimeout(() => {
+    robot.classList.remove('talking');
+    card.classList.remove('selected');
+    if(barTimer) clearInterval(barTimer);
+    // Reset b bars
+    if(id==='b') {
+      document.querySelectorAll('.b-bar').forEach((b,i)=>{
+        b.style.height = [2,4,3,5,2][i]+'px';
+      });
+    }
+  }, 4000);
+}
+</script>
+</body>
+</html>

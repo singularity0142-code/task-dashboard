@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>奇点指令台</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--amber:#F59E0B;--amber-dim:rgba(245,158,11,.15);--amber-border:rgba(245,158,11,.25);}
+body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;
+  background:#060A14;
+  background-image:radial-gradient(ellipse at 20% 15%,rgba(245,158,11,.1) 0%,transparent 55%),
+    radial-gradient(ellipse at 85% 80%,rgba(59,130,246,.07) 0%,transparent 50%),
+    linear-gradient(rgba(245,158,11,.03) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(245,158,11,.03) 1px,transparent 1px);
+  background-size:100% 100%,100% 100%,40px 40px,40px 40px;
+  min-height:100vh;color:#F1F5F9;}
+.app{max-width:680px;margin:0 auto;padding:24px 16px 100px;}
+
+/* Header */
+.header{text-align:center;margin-bottom:28px;padding-top:8px;}
+.back-link{display:inline-flex;align-items:center;gap:5px;color:#475569;font-size:.78rem;text-decoration:none;margin-bottom:16px;padding:5px 12px;border:1px solid rgba(255,255,255,.07);border-radius:20px;transition:color .2s;}
+.back-link:hover{color:#94A3B8;}
+.hdr-badge{display:inline-block;background:rgba(245,158,11,.1);border:1px solid var(--amber-border);border-radius:20px;padding:3px 14px;font-size:.68rem;color:var(--amber);letter-spacing:2px;margin-bottom:12px;}
+.hdr-title{font-size:1.7rem;font-weight:800;color:var(--amber);text-shadow:0 0 28px rgba(245,158,11,.4);letter-spacing:.5px;}
+.hdr-sub{font-size:.78rem;color:#475569;margin-top:6px;}
+.hdr-pulse{display:inline-flex;align-items:center;gap:6px;color:#10B981;font-size:.72rem;margin-top:8px;}
+.hdr-pulse::before{content:'';width:7px;height:7px;border-radius:50%;background:#10B981;display:inline-block;box-shadow:0 0 8px #10B981;animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Stats */
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:22px;}
+.stat-card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:14px 8px;text-align:center;cursor:pointer;transition:all .18s;}
+.stat-card:hover,.stat-card.active{border-color:var(--amber-border);background:var(--amber-dim);}
+.stat-num{font-size:1.7rem;font-weight:800;line-height:1;}
+.stat-label{font-size:.65rem;color:#64748B;margin-top:4px;}
+.s-all .stat-num{color:#F1F5F9;}
+.s-pending .stat-num{color:#60A5FA;}
+.s-active .stat-num{color:#FCD34D;}
+.s-done .stat-num{color:#4ADE80;}
+
+/* Filter bar */
+.filter-bar{display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap;}
+.filter-btn{padding:6px 14px;border-radius:20px;border:1px solid rgba(255,255,255,.1);background:transparent;color:#64748B;font-size:.74rem;cursor:pointer;transition:all .18s;}
+.filter-btn:hover{border-color:rgba(245,158,11,.4);color:#F59E0B;}
+.filter-btn.active{background:var(--amber-dim);border-color:var(--amber-border);color:var(--amber);font-weight:600;}
+
+/* Toolbar */
+.toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+.toolbar-label{font-size:.7rem;color:#334155;letter-spacing:2px;font-weight:700;text-transform:uppercase;}
+.refresh-btn{display:flex;align-items:center;gap:5px;padding:5px 12px;border-radius:20px;border:1px solid rgba(255,255,255,.08);background:transparent;color:#64748B;font-size:.72rem;cursor:pointer;transition:all .18s;}
+.refresh-btn:hover{border-color:rgba(245,158,11,.3);color:var(--amber);}
+.refresh-btn.spinning svg{animation:spin .8s linear infinite;}
+
+/* Task cards */
+.task-card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:14px 16px;margin-bottom:8px;display:flex;align-items:center;gap:12px;transition:border-color .18s;}
+.task-card:hover{border-color:rgba(245,158,11,.2);}
+.task-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;box-shadow:0 0 6px currentColor;}
+.task-info{flex:1;min-width:0;}
+.task-name{font-size:.88rem;font-weight:700;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:3px;}
+.task-meta{font-size:.67rem;color:#475569;display:flex;gap:8px;flex-wrap:wrap;}
+.task-meta-tag{display:inline-flex;align-items:center;gap:3px;}
+.task-right{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;}
+.status-badge{font-size:.65rem;border-radius:20px;padding:3px 10px;cursor:pointer;white-space:nowrap;transition:opacity .15s;user-select:none;}
+.status-badge:hover{opacity:.8;}
+.urge-btn{padding:4px 10px;border-radius:8px;border:1px solid rgba(245,158,11,.3);background:transparent;color:var(--amber);font-size:.67rem;cursor:pointer;white-space:nowrap;transition:all .18s;}
+.urge-btn:hover{background:var(--amber-dim);border-color:var(--amber);}
+.urge-btn.sent{color:#10B981;border-color:rgba(16,185,129,.3);animation:urge-flash .5s;}
+@keyframes urge-flash{0%{opacity:1}50%{opacity:.4}100%{opacity:1}}
+
+/* Priority badge */
+.pri-badge{font-size:.6rem;border-radius:20px;padding:2px 8px;font-weight:600;}
+.pri-high{background:rgba(239,68,68,.15);color:#FCA5A5;}
+.pri-mid{background:rgba(245,158,11,.15);color:#FCD34D;}
+.pri-low{background:rgba(16,185,129,.15);color:#6EE7B7;}
+
+/* Empty */
+.empty{text-align:center;padding:50px 20px;color:#334155;}
+.empty-icon{font-size:2.5rem;margin-bottom:12px;}
+.empty-txt{font-size:.85rem;line-height:1.7;}
+
+/* Toast */
+.toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(16,185,129,.15);border:1px solid rgba(16,185,129,.35);color:#4ADE80;padding:10px 22px;border-radius:30px;font-size:.82rem;font-weight:600;z-index:999;white-space:nowrap;animation:toast-in .25s ease;}
+@keyframes toast-in{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+
+/* Footer */
+.footer{text-align:center;font-size:.62rem;color:#1E293B;margin-top:28px;line-height:2;}
+.footer a{color:#334155;text-decoration:none;}
+.footer a:hover{color:var(--amber);}
+
+@media(max-width:480px){
+  .stats-grid{grid-template-columns:repeat(2,1fr);}
+  .task-card{flex-wrap:wrap;}
+  .task-right{flex-direction:row;align-items:center;width:100%;}
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useCallback}=React;
+
+const SURL='https://nkkbvhtmlooverkhyqsa.supabase.co';
+const SKEY=['eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9','.eyJpc3MiOiJzdXBhYmFzZ','SIsInJlZiI6Im5ra2J2aH','RtbG9vdmVya2h5cXNhIiwi','cm9sZSI6ImFub24iLCJpYX','QiOjE3NzU2OTM1NTksImV4','cCI6MjA5MTI2OTU1OX0.7o','RpImggZHpvusrS6kJKWN6c','v12hYG4NqxUFCIZDCIs'].join('');
+const SB=supabase.createClient(SURL,SKEY);
+
+const BOT=['8770441016',':AAGP-D6f4ht','aiKDB4I2xX9','A3fffu09LueuA'].join('');
+const CHAT='7885643514';
+
+const PC={high:'#EF4444',mid:'#F59E0B',low:'#10B981'};
+const SS={
+  pending:  {bg:'rgba(100,116,139,.18)',cl:'#94A3B8',lb:'待发派'},
+  sent:     {bg:'rgba(59,130,246,.15)', cl:'#60A5FA',lb:'已发派'},
+  'in-progress':{bg:'rgba(245,158,11,.15)',cl:'#FCD34D',lb:'进行中'},
+  completed:{bg:'rgba(21,128,61,.15)',  cl:'#4ADE80',lb:'已完成'},
+  reported: {bg:'rgba(139,92,246,.15)', cl:'#C4B5FD',lb:'已汇报'},
+};
+const STATUS_FLOW=['pending','sent','in-progress','completed','reported'];
+const FILTERS=[
+  {key:'all',   label:'全部'},
+  {key:'sent',  label:'已发派'},
+  {key:'in-progress',label:'进行中'},
+  {key:'completed',  label:'已完成'},
+  {key:'reported',   label:'已汇报'},
+];
+
+function App(){
+  const [tasks,setTasks]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [spinning,setSpinning]=useState(false);
+  const [filter,setFilter]=useState('all');
+  const [toast,setToast]=useState(null);
+  const [urged,setUrged]=useState({});
+
+  const showToast=msg=>{setToast(msg);setTimeout(()=>setToast(null),2500);};
+
+  const load=useCallback(async(quiet=false)=>{
+    if(!quiet){setSpinning(true);}
+    const {data,error}=await SB.from('boss_tasks').select('*').order('id',{ascending:false});
+    if(!error) setTasks(data||[]);
+    setLoading(false);
+    setSpinning(false);
+  },[]);
+
+  useEffect(()=>{load();},[load]);
+  useEffect(()=>{
+    const t=setInterval(()=>load(true),30000);
+    return()=>clearInterval(t);
+  },[load]);
+
+  const cycleStatus=async(id,cur)=>{
+    const ns=STATUS_FLOW[(STATUS_FLOW.indexOf(cur)+1)%STATUS_FLOW.length];
+    await SB.from('boss_tasks').update({status:ns}).eq('id',id);
+    setTasks(p=>p.map(t=>t.id===id?{...t,status:ns}:t));
+    showToast(`状态已更新：${SS[ns]?.lb||ns}`);
+  };
+
+  const urge=async t=>{
+    const dl=t.deadline?new Date(t.deadline).toLocaleDateString('zh-CN'):'待定';
+    const msg=`⚡ *奇点催进度*\n\n📋 任务：${t.title}\n👤 负责人：${t.assignee||'待定'}\n📅 截止：${dl}\n\n请汇报最新进展 👆`;
+    await fetch(`https://api.telegram.org/bot${BOT}/sendMessage`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({chat_id:CHAT,text:msg,parse_mode:'Markdown'})
+    });
+    setUrged(p=>({...p,[t.id]:true}));
+    showToast('⚡ 催进度已发送给奇点');
+    setTimeout(()=>setUrged(p=>({...p,[t.id]:false})),3000);
+  };
+
+  const filtered=filter==='all'?tasks:tasks.filter(t=>t.status===filter);
+  const stats={
+    total:tasks.length,
+    pending:tasks.filter(t=>['pending','sent'].includes(t.status)).length,
+    active:tasks.filter(t=>t.status==='in-progress').length,
+    done:tasks.filter(t=>['completed','reported'].includes(t.status)).length,
+  };
+
+  if(loading)return(
+    <div style={{minHeight:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:14}}>
+      <div style={{width:34,height:34,border:'3px solid #F59E0B',borderTopColor:'transparent',borderRadius:'50%',animation:'spin 1s linear infinite'}}/>
+      <div style={{color:'#475569',fontSize:'.82rem'}}>奇点连接中...</div>
+    </div>
+  );
+
+  return(
+    <div className="app">
+      {/* Header */}
+      <div className="header">
+        <div><a className="back-link" href="./index.html">← 返回任务看板</a></div>
+        <div className="hdr-badge">SINGULARITY COMMAND</div>
+        <div className="hdr-title">🎯 奇点指令台</div>
+        <div className="hdr-sub">任务追踪 · 进度催进 · 结果汇报</div>
+        <div className="hdr-pulse">实时同步中 · 每30秒自动刷新</div>
+      </div>
+
+      {/* Stats */}
+      <div className="stats-grid">
+        <div className={`stat-card s-all${filter==='all'?' active':''}`} onClick={()=>setFilter('all')}>
+          <div className="stat-num">{stats.total}</div>
+          <div className="stat-label">全部指令</div>
+        </div>
+        <div className={`stat-card s-pending${['pending','sent'].includes(filter)?' active':''}`} onClick={()=>setFilter('sent')}>
+          <div className="stat-num">{stats.pending}</div>
+          <div className="stat-label">待处理</div>
+        </div>
+        <div className={`stat-card s-active${filter==='in-progress'?' active':''}`} onClick={()=>setFilter('in-progress')}>
+          <div className="stat-num">{stats.active}</div>
+          <div className="stat-label">进行中</div>
+        </div>
+        <div className={`stat-card s-done${['completed','reported'].includes(filter)?' active':''}`} onClick={()=>setFilter('completed')}>
+          <div className="stat-num">{stats.done}</div>
+          <div className="stat-label">已完成</div>
+        </div>
+      </div>
+
+      {/* Filter bar */}
+      <div className="filter-bar">
+        {FILTERS.map(f=>(
+          <button key={f.key} className={`filter-btn${filter===f.key?' active':''}`} onClick={()=>setFilter(f.key)}>{f.label}</button>
+        ))}
+      </div>
+
+      {/* Toolbar */}
+      <div className="toolbar">
+        <div className="toolbar-label">指令列表 · 点击状态切换</div>
+        <button className={`refresh-btn${spinning?' spinning':''}`} onClick={()=>load()}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+          刷新
+        </button>
+      </div>
+
+      {/* Task list */}
+      {filtered.length===0?(
+        <div className="empty">
+          <div className="empty-icon">{filter==='all'?'📭':'🔍'}</div>
+          <div className="empty-txt">
+            {filter==='all'
+              ?<>暂无指令记录<br/>在任务看板中按 <span style={{color:'#F59E0B'}}>🎙</span> 按钮下达任务</>
+              :'当前筛选条件下暂无数据'}
+          </div>
+        </div>
+      ):filtered.map(t=>{
+        const ss=SS[t.status]||SS.pending;
+        const dotColor=PC[t.priority]||'#F59E0B';
+        return(
+          <div key={t.id} className="task-card">
+            <div className="task-dot" style={{background:dotColor,color:dotColor}}/>
+            <div className="task-info">
+              <div className="task-name">{t.title}</div>
+              <div className="task-meta">
+                {t.assignee&&<span className="task-meta-tag">👤 {t.assignee}</span>}
+                {t.deadline&&<span className="task-meta-tag">📅 {new Date(t.deadline).toLocaleDateString('zh-CN')}</span>}
+                <span className="task-meta-tag">🕐 {new Date(t.created_at).toLocaleDateString('zh-CN')}</span>
+                <span className={`pri-badge pri-${t.priority||'mid'}`}>{{high:'↑ 高',mid:'— 中',low:'↓ 低'}[t.priority]||'中'}</span>
+              </div>
+              {t.description&&<div style={{fontSize:'.66rem',color:'#334155',marginTop:5,lineHeight:1.5}}>{t.description}</div>}
+            </div>
+            <div className="task-right">
+              <span
+                className="status-badge"
+                style={{background:ss.bg,color:ss.cl}}
+                onClick={()=>cycleStatus(t.id,t.status)}
+                title="点击切换状态"
+              >{ss.lb}</span>
+              <button
+                className={`urge-btn${urged[t.id]?' sent':''}`}
+                onClick={()=>urge(t)}
+                disabled={urged[t.id]}
+              >{urged[t.id]?'✓ 已发':'⚡ 催进度'}</button>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Footer */}
+      <div className="footer">
+        奇点指令台 · 催进度通过 Telegram 发送<br/>
+        <a href="./index.html">← 任务看板</a> · 老板说话下达任务
+      </div>
+
+      {toast&&<div className="toast">{toast}</div>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

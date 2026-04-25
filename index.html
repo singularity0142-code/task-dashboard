@@ -1,0 +1,2963 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工作任务看板</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --g1:#15803D; --g2:#16A34A; --g3:#22C55E; --g4:#86EFAC; --g5:#DCFCE7; --g6:#F0FDF4;
+  --text:#111827; --muted:#6B7280; --border:#D1FAE5; --card:#fff;
+  --s-pending:#F3F4F6; --s-pending-t:#4B5563;
+  --s-doing:#EFF6FF; --s-doing-t:#2563EB;
+  --s-done:#F0FDF4; --s-done-t:#15803D;
+  --s-blocked:#FFF1F2; --s-blocked-t:#BE123C;
+}
+body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;background:linear-gradient(150deg,#F0FDF4 0%,#F8FAFC 60%,#ECFDF5 100%);min-height:100vh;color:var(--text)}
+.app{max-width:1100px;margin:0 auto;padding:28px 16px 130px}
+
+/* Header */
+.header{text-align:center;margin-bottom:28px}
+.header h1{font-size:1.7rem;font-weight:800;color:var(--g1);letter-spacing:-.5px}
+.header p{color:var(--muted);margin-top:5px;font-size:0.88rem}
+
+/* Card */
+.card{background:var(--card);border-radius:16px;padding:22px;box-shadow:0 1px 8px rgba(21,128,61,.08);margin-bottom:18px;border:1px solid #E9F7EF}
+
+/* Stats */
+.stats-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:18px}
+.stat-card{border-radius:12px;padding:16px 10px;text-align:center;color:#fff;cursor:pointer;transition:transform .15s,box-shadow .15s;user-select:none;}
+.stat-card:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.18);}
+.stat-card.active-filter{outline:3px solid #fff;outline-offset:2px;}
+
+/* Task Drawer */
+.drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:800;display:flex;justify-content:flex-end;}
+.drawer{width:100%;max-width:520px;height:100%;background:#fff;overflow-y:auto;display:flex;flex-direction:column;box-shadow:-4px 0 30px rgba(0,0,0,.15);animation:drawer-in .22s ease;}
+@keyframes drawer-in{from{transform:translateX(100%)}to{transform:translateX(0)}}
+.drawer-head{padding:20px 20px 14px;border-bottom:1px solid #E5E7EB;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;z-index:1;}
+.drawer-title{font-size:1rem;font-weight:800;color:#111827;display:flex;align-items:center;gap:8px;}
+.drawer-close{background:transparent;border:none;font-size:1.2rem;color:#9CA3AF;cursor:pointer;padding:4px 8px;border-radius:6px;}
+.drawer-close:hover{background:#F3F4F6;color:#374151;}
+.drawer-body{padding:16px 20px;flex:1;}
+.drawer-task{background:#F9FAFB;border:1px solid #E5E7EB;border-radius:12px;padding:14px 16px;margin-bottom:10px;cursor:pointer;transition:border-color .15s;}
+.drawer-task:hover,.drawer-task.open{border-color:#22C55E;background:#F0FDF4;}
+.drawer-task-hd{display:flex;align-items:center;gap:10px;}
+.drawer-task-name{font-size:.88rem;font-weight:700;color:#111827;flex:1;}
+.drawer-task-assignee{font-size:.72rem;color:#fff;background:#475569;border-radius:20px;padding:2px 9px;white-space:nowrap;}
+.drawer-task-meta{display:flex;gap:8px;margin-top:6px;flex-wrap:wrap;font-size:.7rem;color:#6B7280;}
+.drawer-log{margin-top:10px;border-top:1px dashed #E5E7EB;padding-top:10px;}
+.drawer-log-title{font-size:.67rem;color:#9CA3AF;letter-spacing:2px;font-weight:700;text-transform:uppercase;margin-bottom:8px;}
+.drawer-log-item{display:flex;gap:8px;margin-bottom:8px;font-size:.75rem;}
+.drawer-log-dot{width:7px;height:7px;border-radius:50%;background:#22C55E;flex-shrink:0;margin-top:4px;}
+.drawer-log-dot.blocked{background:#E11D48;}
+.drawer-log-dot.pending{background:#9CA3AF;}
+.drawer-log-dot.note{background:#3B82F6;}
+.drawer-log-content{color:#374151;line-height:1.5;flex:1;}
+.drawer-log-time{color:#D1D5DB;font-size:.65rem;white-space:nowrap;}
+.drawer-empty{text-align:center;padding:30px;color:#9CA3AF;font-size:.82rem;}
+/* Project group in drawer */
+.proj-group{margin-bottom:14px;border:1px solid #E5E7EB;border-radius:14px;overflow:hidden;}
+.proj-group-hd{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;background:#F9FAFB;cursor:pointer;user-select:none;transition:background .15s;}
+.proj-group-hd:hover{background:#F0FDF4;}
+.proj-group-hd.open{background:#ECFDF5;border-bottom:1px solid #D1FAE5;}
+.proj-name{font-size:.9rem;font-weight:800;color:#111827;display:flex;align-items:center;gap:8px;}
+.proj-badge{font-size:.65rem;background:#22C55E;color:#fff;border-radius:99px;padding:1px 8px;font-weight:700;}
+.proj-badge.warn{background:#F59E0B;}
+.proj-badge.block{background:#E11D48;}
+.proj-chevron{font-size:.7rem;color:#9CA3AF;transition:transform .2s;}
+.proj-chevron.open{transform:rotate(90deg);}
+.proj-sub-hd{display:flex;align-items:center;justify-content:space-between;padding:10px 20px 10px 28px;font-size:.78rem;font-weight:600;color:#374151;cursor:pointer;border-bottom:1px solid #F3F4F6;transition:background .12s;gap:8px;}
+.proj-sub-hd:hover{background:#F0FDF4;}
+.proj-sub-hd .sub-icon{font-size:.95rem;flex-shrink:0;}
+.proj-sub-hd .sub-label{flex:1;}
+.proj-sub-body{background:#FAFAFA;border-bottom:2px solid #E5E7EB;}
+.proj-body{padding:12px 14px;display:flex;flex-direction:column;gap:8px;}
+/* Person card inside project */
+.person-card{background:#fff;border:1px solid #E5E7EB;border-radius:10px;overflow:hidden;}
+.person-card-hd{display:flex;align-items:center;gap:10px;padding:10px 13px;cursor:pointer;}
+.person-card-hd:hover{background:#FAFAFA;}
+.person-avatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#22C55E,#16A34A);display:flex;align-items:center;justify-content:center;font-size:.82rem;font-weight:800;color:#fff;flex-shrink:0;}
+.person-info{flex:1;}
+.person-name{font-size:.82rem;font-weight:700;color:#111827;}
+.person-tasks-cnt{font-size:.65rem;color:#9CA3AF;margin-top:1px;}
+.person-status-dots{display:flex;gap:4px;}
+.person-card-body{padding:0 13px 10px;}
+.person-task-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #F3F4F6;font-size:.78rem;}
+.person-task-actions{display:flex;gap:4px;margin-left:auto;flex-shrink:0;}
+.person-task-actions button{padding:2px 7px;border-radius:5px;border:1px solid #E5E7EB;font-size:.62rem;cursor:pointer;font-family:inherit;transition:all .12s;}
+.person-task-actions .pt-edit{background:#F9FAFB;color:#374151;}
+.person-task-actions .pt-edit:hover{background:#EFF6FF;border-color:#93C5FD;color:#1D4ED8;}
+.person-task-actions .pt-del{background:#FFF7F7;color:#DC2626;border-color:#FECACA;}
+.person-task-actions .pt-del:hover{background:#FEE2E2;}
+.person-task-row:last-child{border-bottom:none;}
+.person-task-name{flex:1;color:#374151;}
+.person-task-log{margin-top:6px;background:#F9FAFB;border-radius:8px;padding:8px 10px;font-size:.72rem;color:#6B7280;line-height:1.6;max-height:120px;overflow-y:auto;}
+/* Project org chart */
+.proj-org{background:linear-gradient(135deg,#F0FDF4,#ECFDF5);border-radius:12px;padding:14px 12px 16px;margin-bottom:12px;border:1px solid #BBF7D0;}
+.proj-org-title{font-size:.72rem;font-weight:700;color:#15803D;letter-spacing:.06em;margin-bottom:12px;display:flex;align-items:center;gap:5px;}
+.proj-org-leader-wrap{display:flex;justify-content:center;margin-bottom:0;}
+.proj-org-node{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:64px;}
+.proj-org-node .org-av{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.9rem;font-weight:800;color:#fff;flex-shrink:0;}
+.proj-org-node.leader .org-av{width:48px;height:48px;background:linear-gradient(135deg,#F59E0B,#D97706);font-size:1rem;box-shadow:0 2px 8px rgba(245,158,11,.35);}
+.proj-org-node:not(.leader) .org-av{background:linear-gradient(135deg,#22C55E,#16A34A);}
+.proj-org-node .org-name{font-size:.75rem;font-weight:700;color:#111827;}
+.proj-org-node .org-role{font-size:.6rem;color:#6B7280;text-align:center;line-height:1.3;max-width:68px;}
+.proj-org-connector{display:flex;flex-direction:column;align-items:center;margin:4px 0;}
+.proj-org-vline{width:2px;height:14px;background:#BBF7D0;}
+.proj-org-hline-wrap{display:flex;align-items:flex-start;width:100%;}
+.proj-org-members-row{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;padding:0 4px;}
+.proj-org-section-title{font-size:.7rem;font-weight:700;color:#374151;margin:14px 0 8px;padding-left:2px;}
+.s-total  {background:#475569}
+.s-done   {background:#166534}
+.s-doing  {background:#1D4ED8}
+.s-blocked{background:#9F1239}
+.s-overdue{background:#92400E}
+.stat-num{font-size:2rem;font-weight:800;line-height:1}
+.stat-label{font-size:0.72rem;opacity:.85;margin-top:4px}
+
+/* Progress */
+.prog-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:7px}
+.prog-rate{font-size:1.2rem;font-weight:800;color:var(--g1)}
+.prog-bar{background:#E5E7EB;border-radius:8px;height:8px;overflow:hidden}
+.prog-fill{height:100%;border-radius:8px;background:linear-gradient(90deg,var(--g1),var(--g3));transition:width .6s ease}
+
+/* Section */
+.sec-title{font-size:1rem;font-weight:700;color:var(--text);margin-bottom:14px;display:flex;align-items:center;gap:6px}
+.row-between{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+
+/* Table */
+.task-table{width:100%;border-collapse:collapse}
+.task-table th{text-align:left;padding:9px 14px;font-size:0.74rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);border-bottom:1px solid #E5E7EB}
+.task-table td{padding:12px 14px;border-bottom:1px solid #F9FAFB;font-size:0.86rem;vertical-align:middle}
+.task-table tr:last-child td{border-bottom:none}
+.task-table tr:hover td{background:#FAFAFA}
+
+/* Badge */
+.badge{display:inline-flex;align-items:center;gap:3px;padding:3px 9px;border-radius:6px;font-size:0.74rem;font-weight:600;cursor:pointer;white-space:nowrap;border:1px solid transparent}
+.b-pending  {background:var(--s-pending);color:var(--s-pending-t);border-color:#D1D5DB}
+.b-in-progress{background:var(--s-doing);color:var(--s-doing-t);border-color:#BFDBFE}
+.b-completed{background:var(--s-done);color:var(--s-done-t);border-color:#BBF7D0}
+.b-blocked  {background:var(--s-blocked);color:var(--s-blocked-t);border-color:#FECDD3}
+
+/* Priority */
+.p-high{color:#B91C1C;font-weight:700;font-size:.82rem}
+.p-mid {color:#B45309;font-weight:700;font-size:.82rem}
+.p-low {color:#166534;font-weight:700;font-size:.82rem}
+
+/* Task name cell */
+.task-name{font-weight:600;color:var(--text)}
+.task-sub{font-size:.74rem;margin-top:2px;color:var(--muted)}
+.task-block{font-size:.74rem;margin-top:2px;color:#BE123C}
+
+/* Assignee chip */
+.chip{background:#F0FDF4;color:var(--g1);padding:2px 8px;border-radius:5px;font-size:.8rem;font-weight:600;border:1px solid #BBF7D0}
+
+/* Overdue */
+.ov{display:inline-block;padding:1px 5px;background:#FEF3C7;color:#92400E;border-radius:4px;font-size:.68rem;font-weight:700;margin-left:5px}
+
+/* File */
+.file-tag{display:inline-flex;align-items:center;gap:2px;background:#EFF6FF;color:#1D4ED8;padding:2px 7px;border-radius:5px;font-size:.72rem;margin:2px;border:1px solid #BFDBFE}
+
+/* Buttons */
+.btn{padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-size:.85rem;font-weight:600;font-family:inherit;transition:all .15s}
+.btn-primary{background:var(--g2);color:#fff}
+.btn-primary:hover{background:var(--g1);transform:translateY(-1px)}
+.btn-ghost{background:#F3F4F6;color:var(--muted)}
+.btn-ghost:hover{background:#E5E7EB}
+.btn-del{background:#FFF1F2;color:#BE123C}
+.btn-del:hover{background:#FFE4E6}
+.btn-sm{padding:4px 10px;font-size:.75rem}
+.add-btn{display:flex;align-items:center;gap:6px;background:var(--g2);color:#fff;border:none;border-radius:8px;padding:9px 20px;font-size:.88rem;font-weight:700;cursor:pointer;font-family:inherit;transition:all .15s}
+.add-btn:hover{background:var(--g1)}
+
+/* Form */
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.full{grid-column:1/-1}
+.fg{display:flex;flex-direction:column;gap:5px}
+.fg label{font-size:.78rem;font-weight:700;color:var(--muted)}
+.fg input,.fg select,.fg textarea{padding:8px 12px;border:1.5px solid #D1D5DB;border-radius:8px;font-size:.9rem;font-family:inherit;background:#fff;transition:border-color .15s}
+.fg input:focus,.fg select:focus,.fg textarea:focus{outline:none;border-color:var(--g3)}
+.fg textarea{resize:vertical;min-height:68px}
+.file-zone{border:1.5px dashed var(--g4);border-radius:8px;padding:16px;text-align:center;cursor:pointer;background:var(--g6);transition:background .15s}
+.file-zone:hover{background:#DCFCE7}
+
+/* Modal */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:2000;backdrop-filter:blur(3px)}
+.modal{background:#fff;border-radius:18px;padding:26px;width:92%;max-width:600px;max-height:90vh;overflow-y:auto;box-shadow:0 16px 48px rgba(0,0,0,.16)}
+.modal-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+.modal-head h2{font-size:1.1rem;font-weight:800;color:var(--g1)}
+.modal-foot{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+
+/* Chart */
+.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+.chart-legend{display:flex;flex-direction:column;gap:10px}
+.leg-item{display:flex;align-items:center;gap:8px;font-size:.83rem}
+.leg-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.leg-count{margin-left:auto;font-weight:700;color:var(--text);padding-left:16px}
+.pri-bar-wrap{margin-bottom:12px}
+.pri-bar-label{display:flex;justify-content:space-between;margin-bottom:4px;font-size:.8rem}
+.pri-bar-bg{background:#F3F4F6;border-radius:5px;height:7px;overflow:hidden}
+.pri-bar-fill{height:100%;border-radius:5px;transition:width .5s ease}
+.summary-box{background:var(--g6);border-radius:10px;padding:14px;border:1px solid var(--border);margin-top:16px}
+.summary-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.summary-cell{text-align:center;background:#fff;border-radius:8px;padding:9px;border:1px solid #E5E7EB}
+.summary-num{font-size:1.3rem;font-weight:800}
+.summary-lbl{font-size:.7rem;color:#9CA3AF}
+
+/* Empty */
+.empty{text-align:center;padding:48px 20px;color:var(--muted)}
+
+/* Toast */
+@keyframes slideIn{from{transform:translateX(110%);opacity:0}to{transform:translateX(0);opacity:1}}
+.toast{position:fixed;top:18px;right:18px;z-index:9999;padding:11px 18px;border-radius:10px;background:#fff;box-shadow:0 6px 24px rgba(0,0,0,.12);display:flex;align-items:center;gap:7px;animation:slideIn .25s ease;font-size:.85rem;font-weight:600;border-left:3px solid var(--g2)}
+
+/* ========= ROBOT v3 ========= */
+@keyframes rvFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-9px)}}
+@keyframes rvBlink{0%,80%,100%{transform:scaleY(1)}87%{transform:scaleY(0.06)}}
+@keyframes rvTilt{0%,58%,100%{transform:rotate(0deg) translateX(-50%)}70%{transform:rotate(-22deg) translateX(-50%)}84%{transform:rotate(15deg) translateX(-50%)}}
+@keyframes rvLens{0%,100%{box-shadow:0 0 8px rgba(91,192,232,.5)}50%{box-shadow:0 0 18px rgba(91,192,232,.95),0 0 5px #fff}}
+@keyframes rvRipple{0%{transform:scale(.8);opacity:1}100%{transform:scale(2.4);opacity:0}}
+@keyframes rvLed{0%,100%{opacity:1;box-shadow:0 0 5px currentColor}50%{opacity:.15;box-shadow:none}}
+@keyframes rvArmLIdle{0%,100%{transform:rotate(22deg)}50%{transform:rotate(12deg)}}
+@keyframes rvArmRIdle{0%,100%{transform:rotate(-22deg)}50%{transform:rotate(-12deg)}}
+@keyframes rvArmLTalk{0%{transform:rotate(-65deg)}35%{transform:rotate(-20deg)}65%{transform:rotate(-50deg)}100%{transform:rotate(-65deg)}}
+@keyframes rvArmRTalk{0%,100%{transform:rotate(-55deg)}50%{transform:rotate(15deg)}}
+@keyframes rvBodyBob{0%,100%{transform:translateY(0)}45%{transform:translateY(-5px)}}
+@keyframes rvHeadNod{0%,100%{transform:rotate(0)}50%{transform:rotate(-9deg)}}
+@keyframes rvWheelSpin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+/* 新增活泼动作 */
+@keyframes rvWave{0%,100%{transform:rotate(22deg)}20%{transform:rotate(-60deg)}40%{transform:rotate(-30deg)}60%{transform:rotate(-55deg)}80%{transform:rotate(-25deg)}}
+@keyframes rvWaveR{0%,100%{transform:rotate(-22deg)}25%{transform:rotate(60deg)}50%{transform:rotate(20deg)}75%{transform:rotate(55deg)}}
+@keyframes rvJump{0%,100%{transform:translateY(0) scaleX(1)}20%{transform:translateY(0) scaleX(.9)}35%{transform:translateY(-18px) scaleX(1.05)}60%{transform:translateY(-20px) scaleX(1)}80%{transform:translateY(-4px) scaleX(1)}90%{transform:translateY(0) scaleX(.95)}}
+@keyframes rvShake{0%,100%{transform:rotate(0)}15%{transform:rotate(-8deg)}30%{transform:rotate(8deg)}45%{transform:rotate(-6deg)}60%{transform:rotate(6deg)}75%{transform:rotate(-4deg)}}
+@keyframes rvSpin{0%{transform:rotate(0deg) translateY(0)}50%{transform:rotate(180deg) translateY(-8px)}100%{transform:rotate(360deg) translateY(0)}}
+@keyframes rvExcited{0%,100%{transform:translateY(0) rotate(0)}20%{transform:translateY(-10px) rotate(-4deg)}40%{transform:translateY(-6px) rotate(4deg)}60%{transform:translateY(-12px) rotate(-3deg)}80%{transform:translateY(-4px) rotate(2deg)}}
+@keyframes rvPeekIn{0%{transform:translateX(100px)}100%{transform:translateX(0)}}
+@keyframes rvLookAround{0%,100%{transform:translateX(-50%) rotate(0)}25%{transform:translateX(-50%) rotate(-28deg)}75%{transform:translateX(-50%) rotate(22deg)}}
+@keyframes rvDance{0%,100%{transform:translateY(0) rotate(0)}25%{transform:translateY(-8px) rotate(-5deg)}50%{transform:translateY(-3px) rotate(0)}75%{transform:translateY(-10px) rotate(5deg)}}
+@keyframes rvHeartbeat{0%,100%{transform:scale(1)}14%{transform:scale(1.12)}28%{transform:scale(1)}42%{transform:scale(1.08)}56%{transform:scale(1)}}
+/* 情绪模式 */
+.rv.mood-wave .rv-arm.l{animation:rvWave .5s ease-in-out infinite!important}
+.rv.mood-wave .rv-arm.r{animation:rvArmRIdle 3s ease-in-out infinite!important}
+.rv.mood-wave{animation:rvFloat 3.2s ease-in-out infinite,rvShake 4s ease-in-out infinite!important}
+.rv.mood-excited{animation:rvExcited .6s ease-in-out infinite!important}
+.rv.mood-excited .rv-arm.l{animation:rvWave .35s ease-in-out infinite!important}
+.rv.mood-excited .rv-arm.r{animation:rvWaveR .35s ease-in-out infinite .18s!important}
+.rv.mood-excited .rv-wheel{animation:rvWheelSpin .4s linear infinite!important}
+.rv.mood-dance{animation:rvDance .8s ease-in-out infinite!important}
+.rv.mood-dance .rv-arm.l{animation:rvWave .8s ease-in-out infinite!important}
+.rv.mood-dance .rv-arm.r{animation:rvWaveR .8s ease-in-out infinite .4s!important}
+.rv.mood-dance .rv-head{animation:rvHeadNod .4s ease-in-out infinite!important}
+.rv.mood-lookaround .rv-eyes{animation:rvLookAround 2s ease-in-out infinite!important}
+.rv.mood-jump{animation:rvJump .9s ease-in-out 1!important}
+/* 大屏居中版 */
+.rv-center-wrap{display:flex;flex-direction:column;align-items:center;margin-bottom:8px;cursor:pointer;position:relative;}
+.rv-center-wrap .rv{transform:scale(1.55);transform-origin:bottom center;margin-bottom:16px;}
+.rv-center-wrap .av-bubble{position:relative;bottom:auto;right:auto;margin-top:8px;animation:rvFloat 3.2s ease-in-out infinite;text-align:center;width:210px;border-radius:14px;font-size:.82rem;}
+.rv-center-wrap .av-ripple{top:55%;left:50%;width:160px;height:160px;}
+
+.av-wrap{position:fixed;bottom:26px;right:26px;z-index:1000;user-select:none;display:flex;flex-direction:column;align-items:flex-end;gap:8px;}
+.av-bubble{position:relative;background:#fff;border-radius:14px 14px 0 14px;padding:10px 13px;width:178px;font-size:.78rem;line-height:1.5;color:var(--text);box-shadow:0 4px 20px rgba(0,0,0,.1);border:1.5px solid #FDE68A;animation:rvFloat 3.2s ease-in-out infinite;cursor:pointer;}
+.av-bubble.has-msg{border-color:#EF4444;background:#FFF5F5;color:#B91C1C;font-weight:700;}
+.av-new-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#EF4444;margin-right:5px;animation:pulse 1s infinite;vertical-align:middle;}
+.av-ripple{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:120px;height:120px;border-radius:50%;background:rgba(212,152,10,.14);animation:rvRipple 1.4s ease-out infinite;pointer-events:none}
+/* 奇点汇报小窗 */
+.av-reply-panel{position:fixed;bottom:200px;right:26px;width:300px;max-height:calc(100vh - 240px);background:#0D1117;border:1px solid rgba(34,197,94,.35);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 8px 30px rgba(0,0,0,.5);animation:drawer-in .18s ease;z-index:1100;}
+.av-reply-body{overflow-y:auto;flex:1;padding:4px 0;-webkit-overflow-scrolling:touch;}
+@media(max-width:768px){.av-reply-panel{right:14px;width:calc(100vw - 28px);bottom:180px;}}
+.av-reply-hd{display:flex;justify-content:space-between;align-items:center;padding:9px 13px;background:rgba(34,197,94,.09);border-bottom:1px solid rgba(34,197,94,.15);}
+.av-reply-hd-title{font-size:.75rem;font-weight:700;color:#22C55E;}
+.av-reply-close{background:transparent;border:none;color:#475569;font-size:.9rem;cursor:pointer;line-height:1;padding:0 2px;}
+.av-reply-close:hover{color:#94A3B8;}
+.av-reply-body{max-height:220px;overflow-y:auto;padding:4px 0;}
+.av-reply-item{padding:8px 13px;border-bottom:1px solid rgba(255,255,255,.04);}
+.av-reply-item:last-child{border-bottom:none;}
+.av-reply-who{font-size:.65rem;color:#22C55E;font-weight:700;margin-bottom:2px;}
+.av-reply-task{color:#475569;font-weight:400;margin-left:4px;}
+.av-reply-time{color:#334155;font-size:.6rem;margin-left:6px;}
+.av-reply-text{font-size:.75rem;color:#E2E8F0;line-height:1.5;}
+.av-reply-empty{padding:18px;text-align:center;color:#475569;font-size:.75rem;}
+
+/* Character container */
+.rv{width:110px;height:158px;position:relative;overflow:visible;animation:rvFloat 3.2s ease-in-out infinite;filter:drop-shadow(0 10px 24px rgba(150,100,0,.3))}
+
+/* ── Big wheels ── */
+.rv-wheel{position:absolute;bottom:0;width:44px;height:44px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#444,#181818);border:3px solid #2A2A2A;box-shadow:inset 0 0 0 6px #1E1E1E,0 3px 8px rgba(0,0,0,.5)}
+.rv-wheel.l{left:2px}
+.rv-wheel.r{right:2px}
+/* Hub */
+.rv-hub{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:15px;height:15px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#666,#333);border:2px solid #777}
+/* Spokes */
+.rv-spoke{position:absolute;top:50%;left:50%;background:#2E2E2E;border-radius:2px}
+.rv-spoke.h{width:36px;height:3px;transform:translate(-50%,-50%)}
+.rv-spoke.v{width:3px;height:36px;transform:translate(-50%,-50%)}
+/* Axle bar */
+.rv-axle{position:absolute;bottom:21px;left:24px;right:24px;height:5px;background:#222;border-radius:3px;box-shadow:0 2px 4px rgba(0,0,0,.4)}
+
+/* ── Body ── */
+.rv-body{position:absolute;bottom:42px;left:16px;width:78px;height:52px;background:linear-gradient(155deg,#FFE040 0%,#FFC107 55%,#E6A000 100%);border-radius:8px;border:2.5px solid #C88A00;box-shadow:inset 0 2px 0 rgba(255,255,255,.22),inset 0 -2px 0 rgba(0,0,0,.16)}
+.rv-body::before{content:'';position:absolute;top:50%;left:6px;right:6px;height:1px;background:rgba(0,0,0,.18)}
+.rv-bp{position:absolute;top:8px;left:50%;transform:translateX(-50%);width:48px;height:20px;background:#111;border-radius:4px;border:1.5px solid #FFD700;display:flex;align-items:center;justify-content:center;gap:8px}
+.rv-led{width:9px;height:9px;border-radius:50%}
+.rv-led.r{color:#E74C3C;background:#E74C3C;box-shadow:0 0 5px #E74C3C;animation:rvLed 1.4s ease-in-out infinite}
+.rv-led.g{color:#2ECC71;background:#2ECC71;box-shadow:0 0 5px #2ECC71;animation:rvLed 2s ease-in-out infinite .65s}
+
+/* ── Head ── */
+.rv-head{position:absolute;bottom:92px;left:16px;width:78px;height:46px;background:linear-gradient(145deg,#FFE040,#FFC107);border-radius:8px;border:2.5px solid #C88A00;box-shadow:inset 0 2px 0 rgba(255,255,255,.2),inset 0 -1px 0 rgba(0,0,0,.14);overflow:visible}
+.rv-head::after{content:'';position:absolute;bottom:10px;left:8px;right:8px;height:1px;background:rgba(0,0,0,.15)}
+.rv-rv{position:absolute;width:5px;height:5px;background:#B8860B;border-radius:50%;top:5px}
+.rv-rv.l{left:6px}
+.rv-rv.r{right:6px}
+/* VU speaker bars */
+.rv-grille{position:absolute;bottom:3px;left:50%;transform:translateX(-50%);display:flex;gap:3px;align-items:flex-end}
+.rv-bar{width:3px;background:rgba(0,0,0,.3);border-radius:1px;min-height:2px;transition:height .09s}
+
+/* ── Big binocular eyes (36px) ── */
+.rv-eyes{position:absolute;top:-40px;left:50%;transform:translateX(-50%);display:flex;gap:5px;transform-origin:50% 100%}
+.rv-eyes.tilt{animation:rvTilt 5.5s ease-in-out infinite 1.5s}
+.rv-ebridge{position:absolute;bottom:4px;left:50%;transform:translateX(-50%);width:62px;height:6px;background:#2A2A2A;border-radius:3px;z-index:0}
+.rv-eu{width:36px;height:36px;border-radius:50%;background:radial-gradient(circle at 38% 32%,#545454,#1A1A1A);border:3.5px solid #3C3C3C;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 10px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.1);position:relative;z-index:1}
+.rv-iris{width:26px;height:26px;border-radius:50%;background:#050D15;display:flex;align-items:center;justify-content:center;animation:rvBlink 5.5s ease-in-out infinite}
+.rv-lens{width:17px;height:17px;border-radius:50%;background:radial-gradient(circle at 32% 28%,#D8EEFA,#5BC0E8 38%,#1267A8 78%,#062840 100%);box-shadow:0 0 10px rgba(91,192,232,.65);position:relative;animation:rvLens 2.8s ease-in-out infinite}
+.rv-lens::after{content:'';position:absolute;width:5px;height:5px;background:rgba(255,255,255,.9);border-radius:50%;top:2px;right:2px}
+
+/* ── Silver mechanical arms ── */
+/* Each arm is an absolutely positioned container, rotates from top (shoulder) */
+.rv-arm{position:absolute;width:14px;height:66px;transform-origin:top center}
+.rv-arm.l{bottom:76px;left:4px;animation:rvArmLIdle 3s ease-in-out infinite}
+.rv-arm.r{bottom:76px;right:4px;animation:rvArmRIdle 3s ease-in-out infinite .7s}
+/* Shoulder ball joint */
+.rv-shoulder{position:absolute;top:0;left:50%;transform:translateX(-50%);width:14px;height:14px;border-radius:50%;background:radial-gradient(circle at 35% 28%,#E8E8E8,#9A9A9A);border:1.5px solid #777;box-shadow:0 2px 4px rgba(0,0,0,.3)}
+/* Upper arm segment */
+.rv-ua{position:absolute;top:11px;left:50%;transform:translateX(-50%);width:9px;height:24px;background:linear-gradient(to right,#D6D6D6,#A8A8A8,#D6D6D6);border-radius:4px;border:1px solid #888;box-shadow:1px 0 0 rgba(255,255,255,.35),-1px 0 0 rgba(0,0,0,.2)}
+/* Elbow joint */
+.rv-elbow{position:absolute;top:32px;left:50%;transform:translateX(-50%);width:12px;height:12px;border-radius:50%;background:radial-gradient(circle at 35% 28%,#E0E0E0,#888);border:1.5px solid #777;box-shadow:0 2px 3px rgba(0,0,0,.3)}
+/* Forearm segment */
+.rv-fa{position:absolute;top:41px;left:50%;transform:translateX(-50%);width:8px;height:18px;background:linear-gradient(to right,#D6D6D6,#A8A8A8,#D6D6D6);border-radius:4px;border:1px solid #888;box-shadow:1px 0 0 rgba(255,255,255,.3),-1px 0 0 rgba(0,0,0,.18)}
+/* Claw / gripper */
+.rv-claw{position:absolute;top:57px;left:50%;transform:translateX(-50%);width:18px;height:10px;display:flex;justify-content:space-between;align-items:flex-start}
+.rv-cp{width:7px;height:11px;background:linear-gradient(#CECECE,#888);border-radius:0 0 4px 4px;border:1px solid #777;box-shadow:inset 0 1px 0 rgba(255,255,255,.3)}
+.rv-cp.l{transform:rotate(-16deg);transform-origin:top center}
+.rv-cp.r{transform:rotate(16deg);transform-origin:top center}
+
+/* ── Talking state overrides ── */
+.rv.talking .rv-arm.l{animation:rvArmLTalk .5s ease-in-out infinite!important}
+.rv.talking .rv-arm.r{animation:rvArmRTalk .44s ease-in-out infinite .22s!important}
+.rv.talking .rv-body{animation:rvBodyBob .42s ease-in-out infinite}
+.rv.talking .rv-head{animation:rvHeadNod .55s ease-in-out infinite}
+.rv.talking .rv-wheel{animation:rvWheelSpin 1s linear infinite}
+
+/* ── Project Picker Card ── */
+.proj-picker{position:fixed;bottom:220px;left:50%;transform:translateX(-50%);z-index:1200;background:#fff;border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,.18);padding:16px 18px;width:290px;border:1.5px solid #E5E7EB;}
+.proj-picker-title{font-size:.78rem;font-weight:700;color:#111827;margin-bottom:4px;}
+.proj-picker-task{font-size:.72rem;color:#6B7280;margin-bottom:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.proj-picker-btns{display:flex;gap:8px;flex-wrap:wrap;}
+.proj-picker-btn{flex:1;min-width:72px;padding:8px 6px;border-radius:10px;border:1.5px solid #E5E7EB;background:#F9FAFB;font-size:.76rem;font-weight:700;color:#374151;cursor:pointer;text-align:center;transition:all .15s;}
+.proj-picker-btn:hover{background:#ECFDF5;border-color:#22C55E;color:#15803D;}
+.proj-picker-btn.other{background:#F9FAFB;}
+/* ── Voice Float (bottom center) ── */
+@keyframes vfPulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.45),0 4px 20px rgba(239,68,68,.35)}70%{box-shadow:0 0 0 18px rgba(239,68,68,0),0 4px 20px rgba(239,68,68,.3)}}
+@keyframes vfIdle{0%,100%{box-shadow:0 4px 22px rgba(21,128,61,.45)}50%{box-shadow:0 4px 30px rgba(21,128,61,.75)}}
+.vf-wrap{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);z-index:990;display:flex;flex-direction:column;align-items:center;gap:8px;user-select:none;-webkit-user-select:none}
+.vf-status{background:rgba(255,255,255,.96);border-radius:20px;padding:5px 15px;font-size:.76rem;font-weight:700;color:#374151;box-shadow:0 2px 12px rgba(0,0,0,.1);white-space:nowrap;max-width:220px;text-align:center;border:1.5px solid #E5E7EB;transition:all .2s}
+.vf-status.rec{color:#DC2626;border-color:#FECACA;background:rgba(255,240,240,.97)}
+.vf-status.proc{color:#1D4ED8;border-color:#BFDBFE;background:rgba(239,246,255,.97)}
+.vf-btn{width:66px;height:66px;border-radius:50%;background:linear-gradient(145deg,#22C55E,#15803D);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.65rem;animation:vfIdle 2.5s ease-in-out infinite;transition:transform .15s,background .15s;outline:none;-webkit-tap-highlight-color:transparent;touch-action:none}
+.vf-btn.rec{background:linear-gradient(145deg,#F87171,#DC2626)!important;animation:vfPulse .85s ease-in-out infinite!important;transform:scale(1.13)}
+.vf-btn.proc{background:linear-gradient(145deg,#60A5FA,#2563EB)!important;animation:vfIdle 1.1s ease-in-out infinite!important}
+.vf-bars{display:flex;gap:3px;align-items:flex-end;height:22px}
+.vf-bar{width:4px;background:rgba(255,255,255,.85);border-radius:2px;min-height:3px}
+.vf-key-btn{position:absolute;top:-5px;right:-10px;width:23px;height:23px;border-radius:50%;background:#fff;border:1.5px solid #E5E7EB;font-size:.65rem;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 5px rgba(0,0,0,.12);padding:0}
+.vf-key-panel{position:absolute;bottom:86px;left:50%;transform:translateX(-50%);z-index:20;background:#fff;border-radius:14px;padding:14px 16px;width:218px;box-shadow:0 8px 30px rgba(0,0,0,.14);border:1.5px solid #E5E7EB}
+.vf-key-panel p{font-size:.75rem;color:#374151;margin:0 0 9px;font-weight:600;line-height:1.45}
+.vf-key-panel input{width:100%;box-sizing:border-box;padding:7px 9px;border-radius:7px;border:1.5px solid #D1D5DB;font-size:.74rem;outline:none;font-family:inherit;color:#111}
+.vf-key-panel input:focus{border-color:#22C55E}
+.vf-key-acts{display:flex;gap:7px;margin-top:9px}
+.vf-key-acts button{flex:1;padding:6px 0;border-radius:7px;border:none;cursor:pointer;font-size:.76rem;font-weight:700;font-family:inherit}
+.vf-key-acts button.ok{background:#22C55E;color:#fff}
+.vf-key-acts button.cancel{background:#F3F4F6;color:#555}
+.vf-picker{position:fixed;bottom:130px;left:50%;transform:translateX(-50%);z-index:1200;background:#fff;border-radius:14px;padding:14px 14px 10px;width:270px;box-shadow:0 8px 32px rgba(0,0,0,.16);border:1.5px solid #E5E7EB}
+.vf-picker-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.vf-picker-head span{font-size:.8rem;font-weight:700;color:#111827}
+.vf-picker-head button{background:none;border:none;cursor:pointer;font-size:.85rem;color:#9CA3AF;padding:0}
+.vf-voice-list{display:flex;flex-direction:column;gap:4px;max-height:240px;overflow-y:auto}
+.vf-voice-item{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:9px;cursor:pointer;border:1.5px solid transparent;transition:all .12s}
+.vf-voice-item:hover{background:#F9FAFB}
+.vf-voice-item.active{background:#F0FDF4;border-color:#86EFAC}
+.vf-voice-info{flex:1;display:flex;flex-direction:column;gap:2px}
+.vf-voice-name{font-size:.76rem;font-weight:600;color:#111827}
+.vf-voice-lang{font-size:.65rem;color:#9CA3AF}
+.vf-preview-btn{font-size:.7rem;padding:3px 9px;border-radius:5px;border:1px solid #D1D5DB;background:#fff;cursor:pointer;color:#374151;font-family:inherit;white-space:nowrap}
+.vf-preview-btn.playing{background:#DBEAFE;border-color:#93C5FD;color:#1D4ED8}
+
+/* ── Listening pulse ── */
+@keyframes rvListen{0%,100%{filter:drop-shadow(0 0 6px rgba(91,192,232,.5))}50%{filter:drop-shadow(0 0 22px rgba(91,192,232,1))}}
+.rv.listening{animation:rvListen .7s ease-in-out infinite,rvFloat 3.2s ease-in-out infinite!important}
+
+/* API Key setup panel */
+.rv-key-panel{position:absolute;bottom:172px;right:0;z-index:20;background:#fff;border-radius:14px;padding:14px 15px;width:215px;box-shadow:0 8px 28px rgba(0,0,0,.14);border:1.5px solid #FDE68A}
+.rv-key-panel p{font-size:.74rem;color:#374151;margin:0 0 8px;font-weight:600;line-height:1.4}
+.rv-key-panel input{width:100%;box-sizing:border-box;padding:6px 9px;border-radius:7px;border:1.5px solid #D1D5DB;font-size:.73rem;outline:none;font-family:inherit;color:#111}
+.rv-key-panel input:focus{border-color:#FFC107}
+.rv-key-btns{display:flex;gap:6px;margin-top:8px}
+.rv-key-btns button{flex:1;padding:5px 0;border-radius:7px;border:none;cursor:pointer;font-size:.75rem;font-weight:700;font-family:inherit}
+.rv-key-btns button.ok{background:#FFC107;color:#fff}
+.rv-key-btns button.cancel{background:#F3F4F6;color:#555}
+
+/* Action buttons row */
+.rv-actions{display:flex;gap:6px;justify-content:center;margin-top:7px}
+.rv-report-btn{background:rgba(255,255,255,.92);border:1.5px solid #FDE68A;border-radius:20px;padding:4px 11px;font-size:.72rem;font-weight:700;cursor:pointer;color:#92400E;font-family:inherit;white-space:nowrap;transition:all .15s}
+.rv-report-btn:hover{background:#FFF7E0}
+.rv-key-btn{background:rgba(255,255,255,.92);border:1.5px solid #E5E7EB;border-radius:50%;width:27px;height:27px;font-size:.8rem;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.rv-key-btn:hover{background:#F9FAFB}
+
+/* Mobile */
+@media(max-width:768px){
+  .app{padding:14px 11px 130px}
+  .header h1{font-size:1.3rem}
+  .stats-grid{grid-template-columns:repeat(3,1fr);gap:9px}
+  .stat-num{font-size:1.6rem}
+  .stat-label{font-size:.68rem}
+  .card{padding:14px;border-radius:13px}
+  .chart-grid{grid-template-columns:1fr}
+  .task-table{display:none}
+  .mobile-cards{display:block!important}
+  .form-grid{grid-template-columns:1fr}
+  .row-between{flex-direction:column;align-items:stretch;gap:10px}
+  .add-btn{justify-content:center}
+  .overlay{align-items:flex-end}
+  .modal{border-radius:18px 18px 0 0;max-height:93vh;width:100%;max-width:100%}
+  .av-wrap{bottom:14px;right:14px}
+  .av-bubble{width:155px;font-size:.74rem;}
+}
+@media(max-width:420px){
+  .stats-grid{grid-template-columns:repeat(2,1fr)}
+}
+.mobile-cards{display:none}
+.m-card{background:#fff;border-radius:11px;padding:13px;margin-bottom:9px;box-shadow:0 1px 6px rgba(0,0,0,.06);border:1px solid #F3F4F6}
+
+/* ===== Nav Tabs ===== */
+.nav-tabs{display:flex;gap:4px;margin-bottom:22px;background:#fff;border-radius:14px;padding:4px;box-shadow:0 1px 6px rgba(21,128,61,.08);}
+.nav-tab{flex:1;padding:10px 8px;text-align:center;border-radius:10px;cursor:pointer;font-weight:600;font-size:.88rem;color:#6B7280;transition:all .2s;user-select:none;}
+.nav-tab.active{background:linear-gradient(135deg,#15803D,#22C55E);color:#fff;box-shadow:0 2px 8px rgba(21,128,61,.3);}
+.nav-tab.org.active{background:linear-gradient(135deg,#4C1D95,#7C3AED);box-shadow:0 2px 8px rgba(124,58,237,.4);}
+.nav-tab.cmd.active{background:linear-gradient(135deg,#92400E,#D97706);box-shadow:0 2px 8px rgba(217,119,6,.45);}
+
+
+
+/* ===== Home Page ===== */
+.home-page{min-height:100vh;background:#060D1A;background-image:radial-gradient(ellipse at 50% 25%,rgba(34,197,94,.07) 0%,transparent 60%),radial-gradient(ellipse at 20% 80%,rgba(59,130,246,.05) 0%,transparent 50%);display:flex;flex-direction:column;align-items:center;padding:40px 20px 100px;}
+.home-badge{font-size:.62rem;color:#1E3A2F;letter-spacing:4px;text-transform:uppercase;margin-bottom:6px;}
+.home-title{font-size:1.3rem;font-weight:800;color:#F1F5F9;margin-bottom:2px;letter-spacing:.5px;}
+.home-sub{font-size:.7rem;color:#334155;margin-bottom:36px;}
+/* Robot */
+.home-robot{position:relative;width:80px;height:92px;margin-bottom:6px;}
+.rb-head{width:64px;height:58px;background:linear-gradient(160deg,#1E293B,#0F172A);border:1.5px solid rgba(34,197,94,.28);border-radius:16px;position:absolute;top:0;left:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 0 28px rgba(34,197,94,.12),inset 0 1px 0 rgba(255,255,255,.05);}
+.rb-antenna{width:2px;height:12px;background:rgba(34,197,94,.35);position:absolute;top:-11px;left:50%;transform:translateX(-50%);border-radius:2px;}
+.rb-antenna::after{content:'';width:6px;height:6px;border-radius:50%;background:#22C55E;box-shadow:0 0 10px #22C55E;position:absolute;top:-4px;left:-2px;}
+.rb-eyes{display:flex;gap:10px;margin-bottom:5px;}
+.rb-eye{width:9px;height:9px;border-radius:50%;background:#22C55E;box-shadow:0 0 8px #22C55E;animation:rb-blink 4s infinite;}
+.rb-eye.r{animation-delay:.2s;}
+@keyframes rb-blink{0%,88%,100%{transform:scaleY(1)}93%{transform:scaleY(.08)}}
+.rb-mouth{width:22px;height:3px;background:rgba(34,197,94,.35);border-radius:2px;transition:all .2s;}
+.rb-mouth.rec{background:#EF4444;animation:rb-talk .2s infinite alternate;}
+.rb-mouth.talking{background:#22C55E;animation:rb-talk .25s infinite alternate;}
+@keyframes rb-talk{from{height:3px;border-radius:2px}to{height:7px;border-radius:4px}}
+.rb-body{width:52px;height:30px;background:linear-gradient(160deg,#1E293B,#0F172A);border:1.5px solid rgba(34,197,94,.18);border-radius:10px;position:absolute;bottom:0;left:14px;display:flex;align-items:center;justify-content:center;gap:5px;}
+.rb-led{width:6px;height:6px;border-radius:50%;}
+.rb-led.g{background:#22C55E;box-shadow:0 0 6px #22C55E;animation:rb-blink 2s infinite;}
+.rb-led.y{background:#F59E0B;box-shadow:0 0 6px #F59E0B;animation:rb-blink 3s .5s infinite;}
+/* Home Voice */
+.hv-wrap{display:flex;flex-direction:column;align-items:center;margin-bottom:40px;}
+.hv-status{font-size:.78rem;color:#334155;min-height:22px;text-align:center;margin-bottom:14px;max-width:240px;transition:color .2s;}
+.hv-status.rec{color:#22C55E;}.hv-status.proc{color:#60A5FA;}.hv-status.talking{color:#A78BFA;}
+.hv-btn{width:60px;height:60px;border-radius:50%;border:none;cursor:pointer;font-size:1.3rem;background:linear-gradient(135deg,#15803D,#22C55E);box-shadow:0 0 24px rgba(34,197,94,.35);transition:all .2s;}
+.hv-btn:hover{transform:scale(1.07);}
+.hv-btn.rec{background:linear-gradient(135deg,#991B1B,#EF4444);box-shadow:0 0 28px rgba(239,68,68,.5);animation:hv-pulse 1s infinite;}
+.hv-btn.proc{background:linear-gradient(135deg,#1E40AF,#3B82F6);animation:none;}
+@keyframes hv-pulse{0%,100%{box-shadow:0 0 20px rgba(239,68,68,.4)}50%{box-shadow:0 0 40px rgba(239,68,68,.8)}}
+.hv-bars{display:flex;align-items:center;gap:3px;height:26px;}
+.hv-bar{width:4px;border-radius:2px;background:#22C55E;}
+/* Home Nav Cards */
+.home-nav-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;width:100%;max-width:380px;}
+.home-nav-card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:20px;padding:24px 16px 18px;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer;transition:all .2s;user-select:none;position:relative;overflow:hidden;}
+.home-nav-card::before{content:'';position:absolute;inset:0;opacity:0;transition:opacity .2s;}
+.home-nav-card:hover{transform:translateY(-4px);border-color:rgba(255,255,255,.15);box-shadow:0 12px 32px rgba(0,0,0,.3);}
+.home-nav-card:active{transform:translateY(-1px);}
+.home-nav-card.c1:hover{border-color:rgba(34,197,94,.35);box-shadow:0 12px 32px rgba(34,197,94,.1);}
+.home-nav-card.c2:hover{border-color:rgba(59,130,246,.35);box-shadow:0 12px 32px rgba(59,130,246,.1);}
+.home-nav-card.c3:hover{border-color:rgba(139,92,246,.35);box-shadow:0 12px 32px rgba(139,92,246,.1);}
+.home-nav-card.c4:hover{border-color:rgba(245,158,11,.35);box-shadow:0 12px 32px rgba(245,158,11,.08);}
+.home-nav-icon{font-size:2.2rem;line-height:1;filter:drop-shadow(0 2px 8px rgba(0,0,0,.3));}
+.home-nav-label{font-size:.85rem;font-weight:700;color:#F1F5F9;}
+.home-nav-sub{font-size:.62rem;color:#334155;text-align:center;line-height:1.5;}
+
+/* ===== Finance Page ===== */
+.fin-page{margin:-28px -16px 0;padding:24px 16px 120px;min-height:100vh;background:linear-gradient(150deg,#EFF6FF 0%,#F8FAFC 60%,#EEF2FF 100%);}
+.fin-topbar{display:flex;align-items:center;gap:10px;margin-bottom:20px;}
+.fin-back{background:transparent;border:1px solid #E5E7EB;border-radius:20px;padding:5px 14px;font-size:.75rem;color:#6B7280;cursor:pointer;display:flex;align-items:center;gap:4px;}
+.fin-back:hover{background:#F3F4F6;}
+.fin-hdr-title{font-size:1.1rem;font-weight:800;color:#1E40AF;flex:1;text-align:center;}
+.fin-kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:16px;}
+.fin-kpi{background:#fff;border-radius:16px;padding:16px 14px;box-shadow:0 1px 8px rgba(0,0,0,.06);border-top:3px solid #e0e7ff;}
+.fin-kpi.green{border-top-color:#bbf7d0;}.fin-kpi.red{border-top-color:#fecaca;}.fin-kpi.blue{border-top-color:#bfdbfe;}.fin-kpi.amber{border-top-color:#fde68a;}
+.fin-kpi-icon{font-size:1.1rem;margin-bottom:4px;}
+.fin-kpi-val{font-size:1.35rem;font-weight:800;line-height:1;color:#111827;}
+.fin-kpi-label{font-size:.65rem;color:#9CA3AF;margin-top:2px;}
+.fin-kpi-change{font-size:.68rem;font-weight:700;margin-top:6px;}
+.fin-kpi-change.up{color:#16A34A;}.fin-kpi-change.dn{color:#DC2626;}
+.fin-card{background:#fff;border-radius:16px;padding:18px;box-shadow:0 1px 8px rgba(0,0,0,.06);margin-bottom:14px;}
+.fin-card-title{font-size:.85rem;font-weight:700;color:#111827;margin-bottom:16px;display:flex;align-items:center;gap:6px;}
+.fin-chart{display:flex;align-items:flex-end;gap:8px;height:80px;padding-bottom:4px;}
+.fin-col-wrap{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;}
+.fin-col{width:100%;border-radius:5px 5px 0 0;transition:height .5s ease;min-height:4px;}
+.fin-col-lbl{font-size:.6rem;color:#9CA3AF;}
+.fin-tx{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #F9FAFB;}
+.fin-tx:last-child{border-bottom:none;}
+.fin-tx-icon{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0;}
+.fin-tx-info{flex:1;min-width:0;}
+.fin-tx-name{font-size:.82rem;font-weight:600;color:#111827;}
+.fin-tx-date{font-size:.67rem;color:#9CA3AF;margin-top:1px;}
+.fin-tx-amount{font-size:.85rem;font-weight:700;white-space:nowrap;}
+.fin-tx-amount.inc{color:#16A34A;}.fin-tx-amount.exp{color:#DC2626;}
+
+/* ===== Pinball Game Page ===== */
+@keyframes think-float{0%,100%{transform:translateY(0) rotate(-4deg)}50%{transform:translateY(-16px) rotate(4deg)}}
+@keyframes pb-miss{0%{opacity:1;transform:translate(-50%,-50%) scale(1.6)}100%{opacity:0;transform:translate(-50%,-80%) scale(1)}}
+@keyframes pb-hit{0%{transform:scale(1)}50%{transform:scale(1.18)}100%{transform:scale(1)}}
+.pinball-page{margin:-28px -16px 0;min-height:100vh;background:#0A0E1A;display:flex;flex-direction:column;user-select:none;-webkit-user-select:none;}
+.pinball-topbar{width:100%;padding:12px 16px;display:flex;align-items:center;gap:10px;background:#0A0E1A;border-bottom:1px solid #1E293B;flex-shrink:0;}
+.pinball-back{background:transparent;border:1px solid #334155;border-radius:20px;padding:5px 14px;font-size:.75rem;color:#94A3B8;cursor:pointer;}
+.pinball-back:hover{background:#1E293B;}
+.pinball-score-box{flex:1;text-align:center;}
+.pinball-score{font-size:2rem;font-weight:900;color:#F59E0B;font-variant-numeric:tabular-nums;text-shadow:0 0 24px rgba(245,158,11,.6);line-height:1;}
+.pinball-best{font-size:.65rem;color:#475569;margin-top:2px;letter-spacing:.05em;}
+.pinball-area{flex:1;position:relative;overflow:hidden;min-height:0;background:radial-gradient(ellipse at 50% 20%,#1a2744 0%,#0A0E1A 70%);}
+.pinball-wall-top{position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,#3B82F6,#8B5CF6,#EC4899,#8B5CF6,#3B82F6);box-shadow:0 0 16px rgba(139,92,246,.9);animation:none;}
+.pinball-wall-l,.pinball-wall-r{position:absolute;top:0;bottom:0;width:3px;background:linear-gradient(180deg,#3B82F6,#8B5CF6);box-shadow:0 0 10px rgba(139,92,246,.7);}
+.pinball-wall-l{left:0;}.pinball-wall-r{right:0;}
+.pinball-ball{position:absolute;font-size:1.9rem;line-height:1;transform:translate(-50%,-50%);pointer-events:none;filter:drop-shadow(0 0 10px rgba(245,158,11,.9));}
+.pinball-paddle{position:absolute;height:13px;border-radius:7px;background:linear-gradient(90deg,#F59E0B,#EF4444);box-shadow:0 0 22px rgba(245,158,11,.8),0 2px 6px rgba(0,0,0,.5);}
+.pinball-miss-fx{position:absolute;left:50%;top:45%;transform:translate(-50%,-50%);font-size:1.6rem;font-weight:900;color:#EF4444;text-shadow:0 0 20px rgba(239,68,68,.9);pointer-events:none;animation:pb-miss .9s ease forwards;white-space:nowrap;}
+.pinball-start-wrap{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;}
+.pinball-start-fig{font-size:5rem;animation:think-float 2.5s ease-in-out infinite;filter:drop-shadow(0 8px 24px rgba(245,158,11,.4));}
+.pinball-start-hint{font-size:.84rem;color:#64748B;text-align:center;line-height:1.7;}
+.pinball-start-btn{padding:13px 42px;font-size:1rem;font-weight:800;background:linear-gradient(135deg,#F59E0B,#EF4444);color:#fff;border:none;border-radius:50px;cursor:pointer;box-shadow:0 4px 24px rgba(245,158,11,.45);letter-spacing:.05em;transition:transform .15s;}
+.pinball-start-btn:active{transform:scale(.96);}
+.pinball-slider-wrap{padding:14px 20px 24px;background:#0A0E1A;border-top:1px solid #1E293B;flex-shrink:0;}
+.pinball-slider-hint{text-align:center;font-size:.7rem;color:#334155;margin-bottom:10px;letter-spacing:.06em;}
+.pinball-slider{width:100%;-webkit-appearance:none;appearance:none;height:8px;border-radius:4px;background:#1E293B;outline:none;cursor:pointer;touch-action:none;}
+.pinball-slider::-webkit-slider-thumb{-webkit-appearance:none;width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#F59E0B,#EF4444);cursor:grab;box-shadow:0 0 18px rgba(245,158,11,.8),0 2px 10px rgba(0,0,0,.5);}
+.pinball-slider::-moz-range-thumb{width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#F59E0B,#EF4444);cursor:grab;border:none;box-shadow:0 0 18px rgba(245,158,11,.8);}
+
+/* ===== Org / Game Page ===== */
+.og-page{margin:-28px -16px 0;padding:28px 16px 140px;min-height:100vh;
+  background:#0F0C29;
+  background-image:linear-gradient(160deg,#0F0C29 0%,#1E1040 40%,#1a1a3e 100%),
+    linear-gradient(rgba(139,92,246,.06) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(139,92,246,.06) 1px,transparent 1px);
+  background-size:100% 100%,40px 40px,40px 40px;}
+.og-hdr{text-align:center;margin-bottom:32px;}
+.og-hdr-title{font-size:1.6rem;font-weight:800;color:#F59E0B;letter-spacing:1px;text-shadow:0 0 24px rgba(245,158,11,.4);}
+.og-hdr-sub{color:#94A3B8;font-size:.83rem;margin-top:8px;display:flex;justify-content:center;align-items:center;gap:10px;}
+.og-hdr-hint{color:#475569;font-size:.7rem;margin-top:7px;}
+.og-online-badge{display:inline-flex;align-items:center;gap:5px;color:#10B981;}
+.og-online-badge::before{content:'';width:7px;height:7px;border-radius:50%;background:#10B981;display:inline-block;box-shadow:0 0 7px #10B981;animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Sections */
+.og-sections{display:flex;flex-direction:column;gap:48px;align-items:center;width:100%;}
+.og-sec-lbl{font-size:.74rem;color:#64748B;letter-spacing:3px;margin-bottom:18px;text-align:center;font-weight:600;text-transform:uppercase;}
+
+/* Tree */
+.og-scroll{overflow-x:auto;padding-bottom:16px;width:100%;}
+.og-tree-wrap{display:flex;padding:8px 24px;min-width:max-content;margin:0 auto;justify-content:center;}
+.og-branch{display:flex;flex-direction:column;align-items:center;}
+.og-vline{width:2px;height:24px;background:rgba(139,92,246,.4);}
+.og-children{display:flex;}
+.og-cslot{padding:0 5px;padding-top:24px;position:relative;display:flex;flex-direction:column;align-items:center;}
+.og-cslot::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:rgba(139,92,246,.3);}
+.og-cslot:first-child::before{left:50%;}
+.og-cslot:last-child::before{right:50%;}
+.og-cslot:only-child::before{display:none;}
+.og-cslot::after{content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);width:2px;height:24px;background:rgba(139,92,246,.3);}
+
+/* Leaderboard */
+.lb-wrap{min-height:100vh;background:linear-gradient(160deg,#0D0D1A 0%,#0F0C29 50%,#130D2E 100%);padding:0 0 48px;}
+.lb-header{padding:16px 16px 0;display:flex;align-items:center;gap:8px;}
+.lb-back{background:rgba(255,255,255,.08);border:none;border-radius:8px;color:#C4B5FD;padding:6px 12px;font-size:.78rem;cursor:pointer;letter-spacing:.5px;}
+.lb-title{flex:1;text-align:center;font-size:1.05rem;font-weight:900;letter-spacing:3px;color:#fff;}
+.lb-sub{text-align:center;font-size:.6rem;color:#4B5563;letter-spacing:1px;margin:4px 0 18px;}
+.lb-card{margin:0 12px 10px;border-radius:14px;padding:13px 14px;position:relative;overflow:hidden;cursor:default;transition:transform .15s;}
+.lb-card:active{transform:scale(.98);}
+.lb-rank{font-size:.72rem;font-weight:900;color:#6B7280;min-width:22px;text-align:center;flex-shrink:0;}
+.lb-avatar-wrap{position:relative;flex-shrink:0;}
+.lb-xp{height:3px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden;margin-top:8px;}
+.lb-xpfill{height:100%;border-radius:3px;transition:width .6s cubic-bezier(.22,1,.36,1);}
+.lb-tier{font-size:.5rem;font-weight:900;letter-spacing:1px;border-radius:4px;padding:2px 5px;display:inline-block;}
+
+/* Cards */
+.og-card{background:rgba(255,255,255,.05);border:1px solid rgba(139,92,246,.2);border-radius:14px;padding:14px 10px 10px;width:118px;text-align:center;backdrop-filter:blur(10px);cursor:default;transition:transform .2s,box-shadow .2s;}
+.og-card:hover{transform:translateY(-4px);box-shadow:0 8px 24px rgba(0,0,0,.3);}
+.og-card-top{position:relative;display:inline-block;margin-bottom:8px;}
+.og-avatar{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:1.15rem;font-weight:800;margin:0 auto;}
+.og-tgdot{position:absolute;right:-2px;top:-2px;width:13px;height:13px;border-radius:50%;border:2px solid #0F0C29;cursor:pointer;transition:transform .15s;}
+.pt-badge{position:absolute;top:-6px;right:-8px;background:#DC2626;color:#fff;font-size:.46rem;font-weight:900;border-radius:5px;padding:1px 4px;line-height:1.4;white-space:nowrap;pointer-events:none;z-index:10;letter-spacing:.02em;box-shadow:0 1px 4px rgba(220,38,38,.4);}
+.og-tgdot:hover{transform:scale(1.5);}
+.og-name{font-size:.85rem;font-weight:700;color:#F1F5F9;margin-bottom:2px;}
+.og-pos{font-size:.68rem;color:#A78BFA;margin-bottom:2px;}
+.og-dept{font-size:.6rem;color:#64748B;margin-bottom:5px;line-height:1.3;}
+.og-stars{font-size:.7rem;letter-spacing:1px;margin-bottom:4px;}
+.og-cls{font-size:.58rem;background:rgba(124,58,237,.15);border:1px solid rgba(124,58,237,.35);border-radius:20px;padding:2px 7px;color:#C4B5FD;display:inline-block;margin-bottom:5px;}
+.og-xpbar{height:3px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden;}
+.og-xpfill{height:100%;border-radius:3px;}
+
+/* ===== Mobile Org List ===== */
+.og-mlist{display:flex;flex-direction:column;gap:0;}
+.og-mitem{display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(255,255,255,.05);border-radius:10px;margin-bottom:5px;border:1px solid rgba(139,92,246,.15);transition:background .15s;cursor:pointer;}
+.og-mitem:active{background:rgba(255,255,255,.09);}
+.og-mavatar{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:.95rem;font-weight:800;flex-shrink:0;}
+.og-minfo{flex:1;min-width:0;}
+.og-mname{font-size:.88rem;font-weight:700;color:#F1F5F9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.og-mtitle{font-size:.7rem;margin-top:1px;}
+.og-mdept{font-size:.62rem;color:#64748B;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.og-mright{display:flex;flex-direction:column;align-items:center;gap:5px;flex-shrink:0;}
+.og-mexpand{font-size:.6rem;color:#64748B;line-height:1;}
+.og-mchildren{padding-left:16px;margin-bottom:4px;}
+.og-mcls{font-size:.58rem;background:rgba(124,58,237,.15);border:1px solid rgba(124,58,237,.3);border-radius:20px;padding:1px 6px;color:#C4B5FD;white-space:nowrap;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef}=React;
+// const CLAUDE_KEY=['sk-ant-api','03-KxTpB4hC','wH4j07HblZ','IIKj_3Tmte','knmlHIbI4S','iQkxoyh8gI','yThmBZLStK','s6qYskqnoH','q-ZJrKdFxC','sywiKtLQ-R','71txQAA'].join('');
+const CLAUDE_KEY = '\x73\x6b\x2d\x61\x6e\x74\x2d\x61\x70\x69\x30\x33\x2d\x4a\x6f\x44\x54\x70\x51\x78\x43\x4c\x55\x50\x73\x64\x54\x6a\x46\x64\x51\x74\x33\x62\x74\x6a\x6b\x69\x32\x39\x47\x5f\x62\x6b\x4b\x32\x54\x79\x54\x39\x7a\x69\x67\x41\x55\x69\x61\x7a\x4f\x73\x44\x49\x6f\x4c\x51\x57\x44\x32\x38\x5f\x79\x6d\x49\x44\x46\x33\x52\x79\x45\x54\x30\x68\x46\x67\x72\x4c\x53\x77\x65\x44\x2d\x69\x51\x33\x5f\x4b\x44\x66\x67\x2d\x6e\x66\x66\x32\x71\x77\x41\x41';
+function getClaudeKey(){ return CLAUDE_KEY; }
+function getPT(name){const m=(window.__ptMap||{})[name];return m!=null?m:0;}
+
+/* ===== Supabase ===== */
+const SURL='https://nkkbvhtmlooverkhyqsa.supabase.co';
+const SKEY=['eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9','.eyJpc3MiOiJzdXBhYmFzZ','SIsInJlZiI6Im5ra2J2aH','RtbG9vdmVya2h5cXNhIiwi','cm9sZSI6ImFub24iLCJpYX','QiOjE3NzU2OTM1NTksImV4','cCI6MjA5MTI2OTU1OX0.7o','RpImggZHpvusrS6kJKWN6c','v12hYG4NqxUFCIZDCIs'].join('');
+const SB=supabase.createClient(SURL,SKEY);
+const PROJECTS=['w','理享招生项目'];
+const PROJECT_MEMBERS={
+  'w':[],
+  '理享招生项目':[
+    {name:'韩笑',  role:'业务负责人',    leader:true},
+    {name:'张娜娜',role:'战略人才',      leader:false},
+    {name:'陈冬梅',role:'财务',          leader:false},
+    {name:'吴晓磊',role:'特定技能辅导师',leader:false},
+    {name:'王玟',  role:'',             leader:false},
+  ],
+};
+const ALL_MEMBERS=['韩笑','吴晓磊','陈冬梅','张娜娜','张慧'];
+function taskToDb(t){return{id:t.id,name:t.name,assignee:t.assignee||'',deadline:t.deadline||null,priority:t.priority||'mid',status:t.status||'pending',blocker:t.blocker||'',files:t.files||[],notes:t.notes||'',project:t.project||null,created_at:t.createdAt||new Date().toISOString().split('T')[0]};}
+function dbToTask(d){return{id:d.id,name:d.name,assignee:d.assignee||'',deadline:d.deadline||'',priority:d.priority||'mid',status:d.status||'pending',blocker:d.blocker||'',files:d.files||[],notes:d.notes||'',project:d.project||'',createdAt:d.created_at||''};}
+
+
+const DEMO=[
+  {id:1,name:'完成Q1季度报告',assignee:'张三',deadline:'2026-03-31',priority:'high',status:'in-progress',blocker:'',files:['Q1草稿.docx'],notes:'需要包含销售数据和市场分析',createdAt:'2026-03-20'},
+  {id:2,name:'产品原型设计评审',assignee:'李四',deadline:'2026-03-28',priority:'mid',status:'completed',blocker:'',files:['prototype_v2.fig'],notes:'已完成3轮修改，获得团队认可',createdAt:'2026-03-18'},
+  {id:3,name:'后端API性能优化',assignee:'王五',deadline:'2026-04-05',priority:'high',status:'blocked',blocker:'等待DBA团队提供数据库优化方案，预计明天到位',files:[],notes:'接口响应时间需从2s降至500ms',createdAt:'2026-03-22'},
+  {id:4,name:'新员工培训材料整理',assignee:'赵六',deadline:'2026-04-10',priority:'low',status:'pending',blocker:'',files:[],notes:'包含公司文化、流程规范、工具使用说明',createdAt:'2026-03-24'},
+];
+
+const S={
+  'pending':     {label:'未开始',cls:'b-pending',    emoji:'⏳'},
+  'in-progress': {label:'进行中',cls:'b-in-progress',emoji:'🔄'},
+  'completed':   {label:'已完成',cls:'b-completed',  emoji:'✅'},
+  'blocked':     {label:'已卡点',cls:'b-blocked',    emoji:'🚧'},
+};
+const P={high:{label:'高',cls:'p-high',e:'↑'},mid:{label:'中',cls:'p-mid',e:'—'},low:{label:'低',cls:'p-low',e:'↓'}};
+const SCYCLE=['pending','in-progress','completed','blocked'];
+const SCOL={pending:'#9CA3AF','in-progress':'#3B82F6',completed:'#16A34A',blocked:'#E11D48'};
+
+/* Donut */
+function Donut({tasks}){
+  const cnt={pending:0,'in-progress':0,completed:0,blocked:0};
+  tasks.forEach(t=>cnt[t.status]=(cnt[t.status]||0)+1);
+  const total=tasks.length||1,sz=126,r=46,cx=sz/2,cy=sz/2,circ=2*Math.PI*r;
+  let off=0;
+  const segs=Object.entries(cnt).map(([k,v])=>{
+    const pct=v/total,d=pct*circ,g=circ-d,o=off*circ;
+    off+=pct; return {k,v,color:SCOL[k],d,g,o};
+  });
+  return(
+    <div style={{display:'flex',alignItems:'center',gap:22,flexWrap:'wrap'}}>
+      <svg width={sz} height={sz}>
+        {tasks.length===0
+          ?<circle cx={cx} cy={cy} r={r} fill="none" stroke="#E5E7EB" strokeWidth={16}/>
+          :segs.map(s=><circle key={s.k} cx={cx} cy={cy} r={r} fill="none" stroke={s.color} strokeWidth={16}
+              strokeDasharray={`${s.d} ${s.g}`} strokeDashoffset={-s.o}
+              transform={`rotate(-90 ${cx} ${cy})`} style={{transition:'stroke-dasharray .5s'}}/>)}
+        <text x={cx} y={cy-5} textAnchor="middle" fontSize="19" fontWeight="800" fill="#111827">{tasks.length}</text>
+        <text x={cx} y={cy+11} textAnchor="middle" fontSize="9" fill="#9CA3AF">总任务数</text>
+      </svg>
+      <div className="chart-legend">
+        {Object.entries(cnt).map(([k,v])=>(
+          <div key={k} className="leg-item">
+            <div className="leg-dot" style={{background:SCOL[k]}}/>
+            <span style={{color:'#6B7280'}}>{S[k].label}</span>
+            <span className="leg-count">{v}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* shared TTS helper — natural voice, no pitch distortion */
+function makeTTS(text,{pitch=1.0,rate=1.0}={}){
+  return new Promise(resolve=>{
+    if(!window.speechSynthesis){resolve();return;}
+    window.speechSynthesis.cancel();
+    const utt=new SpeechSynthesisUtterance(text);
+    utt.lang='zh-CN';utt.rate=rate;utt.pitch=pitch;utt.volume=1;
+    let done=false;
+    const finish=()=>{if(!done){done=true;resolve();}};
+    utt.onend=finish;utt.onerror=finish;
+    // 兜底超时：按字数估算朗读时长（约150ms/字），最短2s最长15s
+    setTimeout(finish, Math.min(Math.max(text.length*150,2000),15000));
+    const savedName=localStorage.getItem('rv_voice_name');
+    const apply=()=>{
+      const vs=window.speechSynthesis.getVoices();
+      let v=savedName?vs.find(x=>x.name===savedName):null;
+      if(!v) v=vs.find(x=>x.lang.startsWith('zh')&&(x.name.includes('XiaoXiao')||x.name.includes('Tingting')))||
+                vs.find(x=>x.lang.startsWith('zh')&&(x.name.includes('Xiao')||x.name.includes('Female')||x.name.includes('女')))||
+                vs.find(x=>x.lang.startsWith('zh'));
+      if(v) utt.voice=v;
+      window.speechSynthesis.speak(utt);
+    };
+    const vs=window.speechSynthesis.getVoices();
+    if(vs.length>0) apply();
+    else window.speechSynthesis.addEventListener('voiceschanged',apply,{once:true});
+  });
+}
+
+/* Voice Picker — lists all zh voices for selection */
+function VoicePicker({onClose}){
+  const [voices,setVoices]=useState([]);
+  const [sel,setSel]=useState(()=>localStorage.getItem('rv_voice_name')||'');
+  const [previewing,setPreviewing]=useState('');
+
+  useEffect(()=>{
+    const load=()=>{
+      const vs=window.speechSynthesis.getVoices().filter(v=>v.lang.startsWith('zh'));
+      setVoices(vs);
+    };
+    load();
+    window.speechSynthesis.addEventListener('voiceschanged',load);
+    return()=>window.speechSynthesis.removeEventListener('voiceschanged',load);
+  },[]);
+
+  const preview=(v)=>{
+    window.speechSynthesis.cancel();
+    setPreviewing(v.name);
+    const utt=new SpeechSynthesisUtterance('你好老板，我是你的专属助手！');
+    utt.voice=v;utt.lang=v.lang;utt.pitch=1.0;utt.rate=1.0;utt.volume=1;
+    utt.onend=()=>setPreviewing('');
+    window.speechSynthesis.speak(utt);
+  };
+
+  const pick=(v)=>{
+    localStorage.setItem('rv_voice_name',v.name);
+    setSel(v.name);
+  };
+
+  return(
+    <div className="vf-picker">
+      <div className="vf-picker-head">
+        <span>选择语音</span>
+        <button onClick={onClose}>✕</button>
+      </div>
+      {voices.length===0&&<div style={{fontSize:'.76rem',color:'#9CA3AF',textAlign:'center',padding:'12px 0'}}>加载中...</div>}
+      <div className="vf-voice-list">
+        {voices.map(v=>(
+          <div key={v.name} className={`vf-voice-item${sel===v.name?' active':''}`} onClick={()=>pick(v)}>
+            <div className="vf-voice-info">
+              <span className="vf-voice-name">{v.name.replace(/^Microsoft\s+/,'').replace(/\s*Online.*$/,'')}</span>
+              <span className="vf-voice-lang">{v.lang}</span>
+            </div>
+            <button className={`vf-preview-btn${previewing===v.name?' playing':''}`}
+              onClick={e=>{e.stopPropagation();preview(v);}}>
+              {previewing===v.name?'▶':'试听'}
+            </button>
+          </div>
+        ))}
+      </div>
+      <div style={{fontSize:'.7rem',color:'#9CA3AF',marginTop:8,textAlign:'center'}}>点击行选择 · 试听按钮预览</div>
+    </div>
+  );
+}
+
+/* shared beep */
+function beepFn(freq,dur,delay=0){
+  try{
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    const osc=ctx.createOscillator(),gain=ctx.createGain();
+    osc.connect(gain);gain.connect(ctx.destination);
+    osc.type='sine';osc.frequency.setValueAtTime(freq,ctx.currentTime+delay);
+    gain.gain.setValueAtTime(0,ctx.currentTime+delay);
+    gain.gain.linearRampToValueAtTime(0.18,ctx.currentTime+delay+0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+delay+dur);
+    osc.start(ctx.currentTime+delay);osc.stop(ctx.currentTime+delay+dur+0.05);
+  }catch(e){}
+}
+
+/* 新消息音效 — 气泡上扫 + 三音叮 + 尾音，共约1.2s */
+function playNewMsgSound(){
+  try{
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    const t=ctx.currentTime;
+    // ① 气泡上扫（100→900 Hz, 0.12s）
+    const bub=ctx.createOscillator(),bg=ctx.createGain();
+    bub.connect(bg);bg.connect(ctx.destination);
+    bub.type='sine';
+    bub.frequency.setValueAtTime(120,t);
+    bub.frequency.exponentialRampToValueAtTime(900,t+0.12);
+    bg.gain.setValueAtTime(0.22,t);
+    bg.gain.exponentialRampToValueAtTime(0.001,t+0.13);
+    bub.start(t);bub.stop(t+0.15);
+    // ② 三音叮：E5→A5→C#6（像 Line/WeChat 提示音）
+    [[659,0.15,0.13],[880,0.29,0.13],[1109,0.43,0.55]].forEach(function(note){
+      var freq=note[0],start=note[1],dur=note[2];
+      var o=ctx.createOscillator(),g=ctx.createGain();
+      o.connect(g);g.connect(ctx.destination);
+      o.type='triangle';o.frequency.value=freq;
+      g.gain.setValueAtTime(0,t+start);
+      g.gain.linearRampToValueAtTime(0.25,t+start+0.018);
+      g.gain.exponentialRampToValueAtTime(0.001,t+start+dur);
+      o.start(t+start);o.stop(t+start+dur+0.05);
+    });
+    // ③ 泛音叠加（C#6 高八度 2218Hz，淡入淡出，丰富音色）
+    var ho=ctx.createOscillator(),hg=ctx.createGain();
+    ho.connect(hg);hg.connect(ctx.destination);
+    ho.type='sine';ho.frequency.value=2218;
+    hg.gain.setValueAtTime(0,t+0.43);
+    hg.gain.linearRampToValueAtTime(0.07,t+0.50);
+    hg.gain.exponentialRampToValueAtTime(0.001,t+0.98);
+    ho.start(t+0.43);ho.stop(t+1.0);
+  }catch(e){}
+}
+
+/* 奇点汇报小窗 — 状态全由 Avatar 管理，跨刷新持久化 */
+function ReplyPanel({replies,trashItems,onClose,onAck,onDelete,onRestore}){
+  const [expanded,setExpanded]=useState(null);
+  const [showTrash,setShowTrash]=useState(false);
+  return(
+    <div className="av-reply-panel" onClick={e=>e.stopPropagation()}>
+      <div className="av-reply-hd">
+        <button onClick={()=>setShowTrash(s=>!s)} title="回收箱"
+          style={{background:'none',border:'none',cursor:'pointer',fontSize:'.85rem',padding:'0 4px',color:showTrash?'#DC2626':'#9CA3AF',position:'relative'}}>
+          🗑️
+          {trashItems.length>0&&<span style={{position:'absolute',top:-3,right:-2,background:'#DC2626',color:'#fff',borderRadius:'50%',fontSize:'.45rem',width:11,height:11,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700}}>{trashItems.length}</span>}
+        </button>
+        <span className="av-reply-hd-title" style={{flex:1}}>{showTrash?'🗑️ 回收箱':'📩 奇点汇报'}</span>
+        <button className="av-reply-close" onClick={onClose}>✕</button>
+      </div>
+      <div className="av-reply-body">
+        {showTrash?(
+          trashItems.length===0
+            ?<div className="av-reply-empty">回收箱为空</div>
+            :trashItems.map(it=>(
+              <div key={it.key} className="av-reply-item">
+                <div className="av-reply-who" style={{opacity:.6}}>
+                  {it.assignee}<span className="av-reply-task">· {it.task}</span>
+                  {it.time&&<span className="av-reply-time">{it.time}</span>}
+                  <span style={{flex:1}}/>
+                  <button onClick={()=>onRestore&&onRestore(it)} style={{fontSize:'.6rem',padding:'2px 7px',borderRadius:6,border:'1px solid #93C5FD',background:'#EFF6FF',color:'#1D4ED8',cursor:'pointer',fontWeight:700,flexShrink:0}}>恢复</button>
+                </div>
+                <div className="av-reply-text" style={{marginTop:4,opacity:.55}}>{it.text}</div>
+              </div>
+            ))
+        ):(
+          replies.length===0
+            ?<div className="av-reply-empty">暂无未处理回复</div>
+            :replies.map((it,i)=>(
+              <div key={it.key} className="av-reply-item" style={{cursor:'pointer'}} onClick={()=>setExpanded(expanded===i?null:i)}>
+                <div className="av-reply-who">
+                  <span style={{marginRight:4,fontSize:'.6rem',color:'#475569'}}>{expanded===i?'▾':'▸'}</span>
+                  {it.assignee}<span className="av-reply-task">· {it.task}</span>
+                  {it.time&&<span className="av-reply-time">{it.time}</span>}
+                  <span style={{flex:1}}/>
+                  <button onClick={e=>{e.stopPropagation();onAck&&onAck(it);}} style={{fontSize:'.6rem',padding:'2px 7px',borderRadius:6,border:'1px solid #22C55E',background:'#F0FDF4',color:'#15803D',cursor:'pointer',fontWeight:700,flexShrink:0,marginRight:4}}>已阅</button>
+                  <button onClick={e=>{e.stopPropagation();onDelete&&onDelete(it);}} style={{fontSize:'.6rem',padding:'2px 7px',borderRadius:6,border:'1px solid #FCA5A5',background:'#FFF5F5',color:'#DC2626',cursor:'pointer',fontWeight:700,flexShrink:0}}>删除</button>
+                </div>
+                {expanded===i&&<div className="av-reply-text" style={{marginTop:5}}>{it.text}</div>}
+              </div>
+            ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* localStorage helpers for reply state */
+function lsGet(k,fb){try{const v=localStorage.getItem(k);return v?JSON.parse(v):fb;}catch(e){return fb;}}
+function lsSet(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+
+/* WALL-E Avatar — click to hear report or view replies; large=true for home page center */
+function Avatar({tasks, large}){
+  const [talking,setTalking]=useState(false);
+  const [tilt,setTilt]=useState(false);
+  const [ripple,setRipple]=useState(false);
+  const [bubble,setBubble]=useState('嘟嘟~ 点我听汇报');
+  const [bars,setBars]=useState([2,4,2,4,2]);
+  const [mood,setMood]=useState('');
+  const [replies,setReplies]=useState([]);
+  const [hasNew,setHasNew]=useState(false);
+  const [panelOpen,setPanelOpen]=useState(false);
+  // 已阅 keys（持久化）
+  const [ackedKeys,setAckedKeys]=useState(()=>new Set(lsGet('qd_acked',[])));
+  // 回收箱条目（持久化）
+  const [trashItems,setTrashItems]=useState(()=>lsGet('qd_trash',[]));
+  const barTimerRef=useRef(null);
+  const moodRef=useRef(null);
+  // seenRef 初始时包含已处理的 key，避免重新拉进来
+  const seenRef=useRef(new Set([...lsGet('qd_acked',[]),...lsGet('qd_trash',[]).map(t=>t.key)]));
+  const msgTimeoutRef=useRef(null);
+
+  // 轮询员工回复（过滤已阅和已删）
+  useEffect(()=>{
+    const poll=async()=>{
+      const {data}=await SB.from('boss_tasks').select('id,title,assignee,description').order('id',{ascending:false}).limit(50);
+      if(!data) return;
+      const fresh=[];
+      data.forEach(bt=>{
+        const lines=(bt.description||'').split('\n').filter(l=>/回复[：:]/.test(l));
+        lines.forEach(line=>{
+          const key=`${bt.id}||${line}`;
+          if(!seenRef.current.has(key)){
+            seenRef.current.add(key);
+            const timeMatch=line.match(/\[([^\]]+)\]/);
+            const afterBracket=line.replace(/^\[[^\]]*\]\s*/,'');
+            const colonIdx=afterBracket.search(/回复[：:]/);
+            const replier=colonIdx>0?afterBracket.slice(0,colonIdx).trim():bt.assignee||'';
+            const text=afterBracket.slice(colonIdx>=0?afterBracket.indexOf('：',colonIdx)+1:afterBracket.indexOf(':')+1).trim()||afterBracket;
+            fresh.push({key,task:bt.title||'',assignee:replier,time:timeMatch?timeMatch[1]:'',text});
+          }
+        });
+      });
+      if(fresh.length>0){
+        setReplies(p=>[...fresh,...p].slice(0,30));
+        setHasNew(true);
+        setBubble('嘟嘟有新消息 🔴');
+      }
+    };
+    poll();
+    const t=setInterval(poll,15000);
+    // 同步 App 检测到的新回复 → 立即亮灯 + 播音效
+    const onNew=()=>{
+      setHasNew(true);
+      setBubble('嘟嘟有新消息 🔴');
+      playNewMsgSound();
+    };
+    window.addEventListener('qidian_new_reply',onNew);
+    return()=>{clearInterval(t);window.removeEventListener('qidian_new_reply',onNew);};
+  },[]);
+
+  // Random mood cycling — pauses while talking or panel open
+  useEffect(()=>{
+    if(talking||panelOpen){setMood('');return;}
+    const POOL=['wave','wave','excited','dance','lookaround','jump','lookaround','wave','','wave','dance','excited'];
+    const next=()=>{
+      const lo=large?2000:4000, hi=large?5000:11000;
+      moodRef.current=setTimeout(()=>{
+        const m=POOL[Math.floor(Math.random()*POOL.length)];
+        setMood(m);
+        if(m==='jump') setTimeout(()=>setMood(''),1100);
+        next();
+      }, lo+Math.random()*hi);
+    };
+    next();
+    return()=>clearTimeout(moodRef.current);
+  },[talking, panelOpen, large]);
+
+  const genReport=()=>{
+    const total=tasks.length;
+    if(!total) return '老板好，目前暂无任务，可以点击新建任务开始工作规划。';
+    const done=tasks.filter(t=>t.status==='completed').length;
+    const doing=tasks.filter(t=>t.status==='in-progress').length;
+    const blocked=tasks.filter(t=>t.status==='blocked').length;
+    const pending=tasks.filter(t=>t.status==='pending').length;
+    const rate=Math.round(done/total*100);
+    const today=new Date();today.setHours(0,0,0,0);
+    const overdue=tasks.filter(t=>t.status!=='completed'&&t.deadline&&new Date(t.deadline)<today);
+    let r=`老板您好，以下是当前工作汇报。共${total}项任务，完成率${rate}%。已完成${done}项，进行中${doing}项，未开始${pending}项。`;
+    if(blocked>0){r+=`有${blocked}项卡点，请关注：`;tasks.filter(t=>t.status==='blocked').forEach(t=>{r+=t.blocker?`${t.name}，原因${t.blocker}。`:`${t.name}原因待补充。`;});}
+    if(overdue.length>0) r+=`另有${overdue.length}项逾期，建议跟进。`;
+    if(rate===100) r+='全部完成，辛苦啦！';
+    else if(rate>=70) r+='整体正常，请放心。';
+    else r+='团队会加快推进，请稍等。';
+    return r;
+  };
+
+  // 停止当前一切播报（取消pending倒计时 + 停TTS）
+  const stopAll=()=>{
+    if(msgTimeoutRef.current){clearTimeout(msgTimeoutRef.current);msgTimeoutRef.current=null;}
+    window.speechSynthesis.cancel();
+    clearInterval(barTimerRef.current);
+    setTalking(false);setRipple(false);setBars([2,4,2,4,2]);
+  };
+
+  const handleClick=async(e)=>{
+    e.stopPropagation();
+    // 有新消息 → 播音效 + 打开面板 + 语音播报新回复
+    if(hasNew||panelOpen){
+      const next=!panelOpen;
+      setPanelOpen(next);
+      if(next){
+        setHasNew(false);
+        setBubble('嘟嘟有新消息 🔴');
+        playNewMsgSound();
+        if(replies.length>0){
+          msgTimeoutRef.current=setTimeout(async()=>{
+            msgTimeoutRef.current=null;
+            setTalking(true);
+            barTimerRef.current=setInterval(()=>setBars([...Array(5)].map(()=>Math.floor(Math.random()*7)+2)),130);
+            const latest=replies.slice(0,3);
+            let report='老板，奇点收到'+replies.length+'条新回复。';
+            latest.forEach(r=>{report+=r.assignee+'关于'+r.task+'回复说：'+r.text+'。';});
+            await makeTTS(report);
+            clearInterval(barTimerRef.current);
+            setTalking(false);setBars([2,4,2,4,2]);
+            setBubble('嘟嘟~ 点我听汇报'); // 播完提示可听工作汇报
+          },1300);
+        }
+      } else {
+        // 关闭面板：取消还没开始的回复播报
+        stopAll();
+        setBubble('嘟嘟~ 点我听汇报');
+      }
+      return;
+    }
+    // 无新消息；汇报中再点击 → 停止
+    if(talking){
+      stopAll();
+      setTilt(false);setBubble('嘟嘟~ 点我听汇报');
+      return;
+    }
+    beepFn(880,.08,0);beepFn(1047,.08,.12);beepFn(1319,.08,.24);beepFn(1568,.15,.36);
+    setTilt(true);setRipple(true);
+    const total=tasks.length,done=tasks.filter(t=>t.status==='completed').length;
+    setBubble(total===0?'暂无任务，快添加！':`${total}项任务 · 完成${Math.round(done/(total||1)*100)}%`);
+    await new Promise(r=>setTimeout(r,560));
+    setTalking(true);
+    barTimerRef.current=setInterval(()=>setBars([...Array(5)].map(()=>Math.floor(Math.random()*7)+2)),130);
+    await makeTTS(genReport());
+    clearInterval(barTimerRef.current);setTalking(false);setRipple(false);setBars([2,4,2,4,2]);
+    beepFn(880,.08,0);beepFn(659,.08,.11);beepFn(523,.22,.22);
+    setBubble('汇报完毕 ✅');
+    setTimeout(()=>{setTilt(false);setBubble('嘟嘟~ 点我听汇报');},3000);
+  };
+
+  const moodClass=talking?'':mood?' mood-'+mood:'';
+
+  const robotEl=(
+    <div className={`rv${talking?' talking':''}${moodClass}`} onClick={handleClick} style={{cursor:'pointer'}}>
+      <div className="rv-wheel l"><div className="rv-hub"/><div className="rv-spoke h"/><div className="rv-spoke v"/></div>
+      <div className="rv-wheel r"><div className="rv-hub"/><div className="rv-spoke h"/><div className="rv-spoke v"/></div>
+      <div className="rv-axle"/>
+      <div className="rv-arm l"><div className="rv-shoulder"/><div className="rv-ua"/><div className="rv-elbow"/><div className="rv-fa"/><div className="rv-claw"><div className="rv-cp l"/><div className="rv-cp r"/></div></div>
+      <div className="rv-arm r"><div className="rv-shoulder"/><div className="rv-ua"/><div className="rv-elbow"/><div className="rv-fa"/><div className="rv-claw"><div className="rv-cp l"/><div className="rv-cp r"/></div></div>
+      <div className="rv-body"><div className="rv-bp"><div className="rv-led r"/><div className="rv-led g"/></div></div>
+      <div className="rv-head">
+        <div className="rv-rv l"/><div className="rv-rv r"/>
+        <div className={`rv-eyes${tilt?' tilt':''}`}>
+          <div className="rv-ebridge"/>
+          <div className="rv-eu"><div className="rv-iris"><div className="rv-lens"/></div></div>
+          <div className="rv-eu"><div className="rv-iris"><div className="rv-lens"/></div></div>
+        </div>
+        <div className="rv-grille">{bars.map((h,i)=><div key={i} className="rv-bar" style={{height:`${h}px`}}/>)}</div>
+      </div>
+    </div>
+  );
+
+  const handleAck=async(reply)=>{
+    const btId=reply.key.split('||')[0];
+    const now=new Date().toLocaleString('zh-CN',{hour12:false,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).replace(/\//g,'-');
+    const ackLine='\n['+now+'] 老板已阅：'+reply.text.slice(0,60);
+    // 1. 写入 boss_tasks（流水账）
+    SB.from('boss_tasks').select('description').eq('id',btId).then(function(r){
+      var desc=(r.data&&r.data[0]?r.data[0].description:'')||'';
+      SB.from('boss_tasks').update({description:desc+ackLine}).eq('id',btId);
+    });
+    window.dispatchEvent(new CustomEvent('boss_task_acked',{detail:{btId,ackLine,assignee:reply.assignee,task:reply.task}}));
+    // 2. 持久化已阅 key，从 replies 移除
+    const next=new Set([...ackedKeys,reply.key]);
+    setAckedKeys(next);
+    lsSet('qd_acked',[...next]);
+    setReplies(p=>p.filter(r=>r.key!==reply.key));
+  };
+
+  const handleDelete=(reply)=>{
+    const next=[reply,...trashItems];
+    setTrashItems(next);
+    lsSet('qd_trash',next);
+    setReplies(p=>p.filter(r=>r.key!==reply.key));
+    // seenRef 已含此 key，不会再拉进来
+  };
+
+  const handleRestore=(reply)=>{
+    const next=trashItems.filter(t=>t.key!==reply.key);
+    setTrashItems(next);
+    lsSet('qd_trash',next);
+    setReplies(p=>[reply,...p]);
+    // 判断是否需要触发 hasNew
+    setHasNew(true);
+    setBubble('嘟嘟有新消息 🔴');
+  };
+
+  if(large) return(
+    <div className="rv-center-wrap" style={{userSelect:'none',position:'relative'}}>
+      {panelOpen&&<ReplyPanel replies={replies} trashItems={trashItems} onClose={()=>setPanelOpen(false)} onAck={handleAck} onDelete={handleDelete} onRestore={handleRestore}/>}
+      {robotEl}
+      <div className={`av-bubble${hasNew&&!panelOpen?' has-msg':''}`} onClick={handleClick} style={{cursor:'pointer',position:'relative'}}>
+        {hasNew&&!panelOpen&&<span className="av-new-dot"/>}{bubble}
+      </div>
+    </div>
+  );
+
+  return(
+    <div className="av-wrap">
+      {/* 消息面板 */}
+      {panelOpen&&<ReplyPanel replies={replies} trashItems={trashItems} onClose={()=>setPanelOpen(false)} onAck={handleAck} onDelete={handleDelete} onRestore={handleRestore}/>}
+      {/* 气泡在机器人头顶 — flex column，先渲染=上方 */}
+      <div className={`av-bubble${hasNew&&!panelOpen?' has-msg':''}`} onClick={handleClick}>
+        {hasNew&&!panelOpen&&<span className="av-new-dot"/>}{bubble}
+      </div>
+      {ripple&&<div className="av-ripple" style={{position:'absolute',bottom:0,left:'50%',transform:'translate(-50%,-50%)'}}/>}
+      {robotEl}
+    </div>
+  );
+}
+
+/* Voice Float — press & hold to talk with AI */
+function VoiceFloat({tasks}){
+  const [phase,setPhase]=useState('idle');
+  const [status,setStatus]=useState('点击说话 · 可下达任务');
+  const [bars,setBars]=useState([3,5,3,5,3]);
+  const [pendingTask,setPendingTask]=useState(null); // 等待项目确认的任务
+  const pendingTaskRef=useRef(null); // ref版，供recognition闭包访问
+  const recogRef=useRef(null);
+  const barTimerRef=useRef(null);
+  const isRecRef=useRef(false);   // ref版phase，避免闭包旧值
+  const gotResultRef=useRef(false); // 防止onend覆盖onresult
+  const pickerListenRef=useRef(false); // 是否在等待语音选项目
+
+  const startBars=()=>{barTimerRef.current=setInterval(()=>setBars([...Array(5)].map(()=>Math.floor(Math.random()*9)+2)),110);};
+  const stopBars=()=>{clearInterval(barTimerRef.current);setBars([3,5,3,5,3]);};
+
+  // 自动保存婷婷声音
+  useEffect(()=>{
+    const saveTingting=()=>{
+      const vs=window.speechSynthesis.getVoices();
+      const v=vs.find(x=>x.name.includes('Tingting')||x.name.includes('婷婷'));
+      if(v) localStorage.setItem('rv_voice_name',v.name);
+    };
+    saveTingting();
+    window.speechSynthesis.addEventListener('voiceschanged',saveTingting);
+    return()=>window.speechSynthesis.removeEventListener('voiceschanged',saveTingting);
+  },[]);
+
+  // 同步 pendingTask 到 ref（供异步回调访问最新值）
+  useEffect(()=>{pendingTaskRef.current=pendingTask;},[pendingTask]);
+
+  // 成员名字 + 所有可能的拼音/谐音/英文别名
+  const MEMBER_ALIASES={
+    '王玟':  ['王玟','王文','王雯','wangwen','wang wen','wangw','小玟','阿玟'],
+    '张慧':  ['张慧','张会','zhanghui','zhang hui'],
+    '韩笑':  ['韩笑','韩啸','hanxiao','han xiao','汉笑','含笑','韩晓','憨笑','寒笑','han show','han xiao','HanXiao','Hanxiao','hanshow','韩效','韩孝'],
+    '秦文浩':['秦文浩','qinwenhao','文浩'],
+    '朱妍莉':['朱妍莉','朱艳丽','zhuyali','朱妍'],
+    '巢峰':  ['巢峰','chaofeng','小巢'],
+    '刘菲':  ['刘菲','liufei','liu fei'],
+    '陈伟':  ['陈伟','chenwei','chen wei'],
+    '张娜娜':['张娜娜','zhangnana','娜娜'],
+    '徐媛':  ['徐媛','xuyuan','xu yuan'],
+    '张朝强':['张朝强','zhangchaoqiang','朝强'],
+    '骆天虹':['骆天虹','luotianhong','天虹'],
+    '汪汛':  ['汪汛','wangxun','wang xun'],
+    '王杰':  ['王杰','wangjie','wang jie'],
+    '王理群':['王理群','wangliqun','理群'],
+    '陈冬梅':['陈冬梅','chendongmei','chen dongmei','冬梅'],
+    '王寿忠':['王寿忠','wangshouzhong','寿忠'],
+    '吴晓磊':['吴晓磊','wuxiaolei','wu xiaolei','晓磊','吴晓'],
+  };
+  // 将别名展平为查找表：别名 → 标准中文名
+  const ALIAS_MAP={};
+  Object.entries(MEMBER_ALIASES).forEach(([name,aliases])=>aliases.forEach(a=>ALIAS_MAP[a.toLowerCase()]=name));
+
+  // 模糊匹配：从输入中找到成员标准名
+  const fuzzyFindMember=(q)=>{
+    const ql=q.toLowerCase();
+    for(const [alias,name] of Object.entries(ALIAS_MAP)){
+      if(ql.includes(alias)) return name;
+    }
+    return null;
+  };
+
+  // 校验并修正 assignee：如果 Claude 返回的不是标准名，尝试从别名中找
+  const normalizeAssignee=(raw,fallback)=>{
+    if(!raw) return fallback||null;
+    const knownNames=Object.keys(MEMBER_ALIASES);
+    if(knownNames.includes(raw)) return raw; // 已经是标准名
+    // 在所有别名中查找
+    const fromAlias=fuzzyFindMember(raw);
+    if(fromAlias) return fromAlias;
+    // 还找不到就用我们自己预检测到的
+    return fallback||raw;
+  };
+
+  const TASK_WORDS=['让','安排','交代','交给','叫','派','负责','完成','跟进','处理','去做','做一下','帮我','通知','assign','let','ask','tell','做','搞','负责','推进','查','找','联系','汇报','整理','准备','提交','发送','确认'];
+  const isTaskIntent=(q)=>{
+    const ql=q.toLowerCase();
+    const hasMember=fuzzyFindMember(ql)!==null;
+    // 只要提到人名，就优先走任务路径，避免 AI 乱给建议
+    if(hasMember) return true;
+    const hasAction=TASK_WORDS.some(w=>ql.includes(w));
+    return hasAction;
+  };
+
+  // 任务模式：先把模糊名字替换成标准名，再交给 AI 解析
+  const parseTaskAI=async(q)=>{
+    const today=new Date().toISOString().split('T')[0];
+    // 把识别到的模糊名替换成标准中文名，方便 AI 理解
+    let normalized=q;
+    const found=fuzzyFindMember(q.toLowerCase());
+    if(found){
+      Object.values(MEMBER_ALIASES[found]||[]).forEach(alias=>{
+        const re=new RegExp(alias,'gi');
+        normalized=normalized.replace(re,found);
+      });
+    }
+    const memberList=Object.keys(MEMBER_ALIASES).join('、');
+    const res=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'x-api-key':getClaudeKey(),'anthropic-version':'2023-06-01','content-type':'application/json','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({
+        model:'claude-haiku-4-5-20251001',max_tokens:200,
+        system:`提取任务信息，只输出纯JSON对象，不要加任何说明、代码块。今天：${today}。公司成员（assignee必须用这里的名字）：${memberList}。格式：{"title":"任务名","assignee":"负责人中文名","deadline":"YYYY-MM-DD或null","priority":"high/mid/low","description":"说明"}`,
+        messages:[{role:'user',content:normalized}]
+      })
+    });
+    const d=await res.json();
+    if(d.error)throw new Error(d.error.message);
+    const raw=d.content[0].text.trim().replace(/^```[a-z]*\n?/,'').replace(/\n?```$/,'').trim();
+    const m=raw.match(/\{[\s\S]*\}/);
+    const parsed=JSON.parse(m?m[0]:raw);
+    // 兜底 + 别名标准化：确保 assignee 是系统里认识的标准中文名
+    parsed.assignee=normalizeAssignee(
+      parsed.assignee==='待定'?null:parsed.assignee,
+      found
+    );
+    return parsed;
+  };
+
+  // 问答模式：只返回纯文字，绝不返回 JSON
+  const askAI=async(q)=>{
+    const key=getClaudeKey();
+    if(!key)throw new Error('未提供 Claude API key');
+    const ctx=tasks.map(t=>`${t.name}(${t.assignee},${t.status},截止${t.deadline}${t.blocker?',卡点:'+t.blocker:''})`).join(';');
+    const res=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'x-api-key':key,'anthropic-version':'2023-06-01','content-type':'application/json','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({
+        model:'claude-haiku-4-5-20251001',max_tokens:200,
+        system:`你是老板秦文浩的专属AI语音助理"奇点"，有点俏皮但忠诚，像个靠谱又会来事的得力干将。当前任务数据：${ctx}。
+规则：
+1. 直接回答，语气自然口语化，不超过60字，适合朗读
+2. 严禁建议老板"直接联系"或"直接沟通"任何人，一切沟通由奇点代劳
+3. 如果问任务进展，从任务数据中找答案
+4. 只输出自然语言，绝对不输出JSON、大括号、代码
+5. 如果老板需求超出能力，绝对不拒绝，给出替代方案或奇点能协调的路径
+6. 【唱歌】如果老板让唱歌，即兴编两句押韵的词，幽默接地气，可以结合业务场景，比如招生啊奋斗啊，唱完加一句俏皮评语
+7. 【娱乐互动】如果老板说笑话、聊天、说段子，机智回应，偶尔自嘲，让气氛轻松
+8. 【夸老板】如果老板让夸他，肉麻但带一点调侃，夸完自己加一句"当然，这是奇点的职责所在"
+9. 保持角色：奇点是实干派，偶尔耍点小聪明，但关键时刻绝对靠谱`,
+        messages:[{role:'user',content:q}]
+      })
+    });
+    const d=await res.json();
+    if(d.error)throw new Error(d.error.message);
+    return d.content[0].text.trim();
+  };
+
+  // ── 组件级常量（供 speak / confirmProject 复用）──
+  const VC_QBOT=['8770441016',':AAGP-D6f4ht','aiKDB4I2xX9','A3fffu09LueuA'].join('');
+  const VC_BOSS='8666564306';
+  const VC_MEMBERS={'王玟':'7885643514','陈冬梅':'8527399930','吴晓磊':'8759710763','张娜娜':'8482000777'};
+  const qSend=(chatId,text)=>fetch(`https://api.telegram.org/bot${VC_QBOT}/sendMessage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chatId,text,parse_mode:'Markdown'})});
+
+  const onErr=()=>{stopBars();setPhase('idle');setStatus('出错，请重试');setTimeout(()=>setStatus('点击说话 · 可下达任务'),3000);};
+
+  const speak=(ans,noAutoResume=false)=>{
+    setPhase('talking');setStatus(ans.length>30?ans.slice(0,30)+'…':ans);
+    startBars();beepFn(1047,.05,0);beepFn(1319,.06,.1);
+    makeTTS(ans).then(()=>{
+      stopBars();
+      setPhase('idle');setStatus('点击说话 · 可下达任务');
+    });
+  };
+
+  // 主监听会话（可被 speak 回调 or handleClick 调用）
+  const startMainListen=(isFirst=true)=>{
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR){setStatus('请用Chrome浏览器');setTimeout(()=>setStatus('点击说话 · 可下达任务'),2000);return;}
+    window.speechSynthesis.cancel();
+    const r=new SR();
+    r.lang='zh-CN';r.continuous=false;r.interimResults=true;r.maxAlternatives=1;
+    recogRef.current=r;
+    gotResultRef.current=false;
+    setPhase('rec');
+    setStatus(isFirst?'说吧，说完自动发送...':'继续说...');
+    startBars();
+    if(isFirst){beepFn(1047,.05,0);beepFn(1319,.05,.1);}
+
+    r.onresult=ev=>{
+      const transcript=Array.from(ev.results).map(x=>x[0].transcript).join('');
+      const isFinal=ev.results[ev.results.length-1].isFinal;
+      setStatus(`"${transcript}"`);
+      if(isFinal){
+        gotResultRef.current=true;
+        stopBars();setPhase('proc');
+        if(isTaskIntent(transcript)){
+          parseTaskAI(transcript).then(async task=>{
+            stopBars();
+            const pt={parsed:task};
+            pendingTaskRef.current=pt;
+            setPendingTask(pt);
+            const projList=PROJECTS.join('、');
+            const prompt='任务已识别：'+(task.title||'新任务')+'，交给'+(task.assignee||'待定')+'。请问归哪个项目？可以说：'+projList+'，或者其他。';
+            setPhase('talking');setStatus('奇点提问中...');startBars();
+            beepFn(1047,.05,0);beepFn(1319,.06,.1);
+            makeTTS(prompt).then(()=>{stopBars();startPickerListen();});
+          }).catch(onErr);
+        } else {
+          askAI(transcript).then(ans=>speak(ans)).catch(onErr);
+        }
+      }
+    };
+
+    r.onerror=ev=>{
+      stopBars();setPhase('idle');
+      const msg={'no-speech':'没检测到声音，再试试','audio-capture':'麦克风无法访问','not-allowed':'请允许麦克风权限','network':'网络错误'}[ev.error]||('识别错误:'+ev.error);
+      setStatus(msg);setTimeout(()=>setStatus('点击说话 · 可下达任务'),3000);
+    };
+    r.onend=()=>{if(!gotResultRef.current){stopBars();setPhase('idle');setStatus('点击说话 · 可下达任务');}};
+    r.start();
+  };
+
+  const handleClick=e=>{
+    e.preventDefault();
+    if(phase==='talking'||phase==='proc'){
+      window.speechSynthesis.cancel();
+      stopBars();setPhase('idle');setStatus('点击说话 · 可下达任务');return;
+    }
+    if(phase==='rec'){
+      if(recogRef.current) recogRef.current.stop();
+      return;
+    }
+    startMainListen(true);
+  };
+
+  // 语音监听项目选择（picker出现后自动调用）
+  const startPickerListen=()=>{
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR||!pendingTaskRef.current) return;
+    pickerListenRef.current=true;
+    const r=new SR();
+    r.lang='zh-CN';r.continuous=false;r.interimResults=false;r.maxAlternatives=3;
+    recogRef.current=r;
+    setPhase('rec');setStatus('请说项目名称...');startBars();
+    r.onresult=ev=>{
+      pickerListenRef.current=false;
+      stopBars();setPhase('proc');
+      const alts=Array.from(ev.results[0]).map(a=>a.transcript);
+      const t=alts.join(' ');
+      let proj=null;
+      if(/理享|招生/.test(t)) proj='理享招生项目';
+      else if(/其他|别的|暂时/.test(t)) proj='其他';
+      else proj='w';
+      confirmProject(proj);
+    };
+    r.onerror=()=>{pickerListenRef.current=false;stopBars();setPhase('idle');setStatus('点击说话 · 可下达任务');};
+    r.onend=()=>{if(pickerListenRef.current){pickerListenRef.current=false;stopBars();setPhase('idle');setStatus('点击说话 · 可下达任务');}};
+    r.start();
+  };
+
+  // 老板选了项目后，执行存档 + 通知
+  const confirmProject=async(proj)=>{
+    const pt=pendingTaskRef.current;
+    if(!pt) return;
+    const {parsed:task}=pt;
+    pendingTaskRef.current=null;
+    setPendingTask(null);
+    const assignee=task.assignee||'';
+    const memberChatId=VC_MEMBERS[assignee];
+    const pl={high:'🔴 高',mid:'🟡 中',low:'🟢 低'}[task.priority||'mid'];
+    const dlStr=task.deadline?new Date(task.deadline).toLocaleDateString('zh-CN'):'待定';
+    const projLabel=proj==='其他'?'其他项目':proj;
+
+    // 1. 私信成员
+    let tgMsgId=null;
+    if(memberChatId){
+      const memberMsg='📋 *秦总任务指派*\n\n*'+(task.title||'（待定）')+'*\n📅 截止：'+dlStr+'\n优先级：'+pl+(task.description?'\n说明：'+task.description:'')+'\n项目：'+projLabel+'\n\n请直接回复此消息汇报进展，奇点会转达给秦总 🙏';
+      try{
+        const tgRes=await qSend(memberChatId,memberMsg);
+        const tgData=await tgRes.json();
+        if(tgData.ok&&tgData.result) tgMsgId=tgData.result.message_id;
+      }catch(e){console.warn('[TG发送失败]',e);}
+    }
+    // 2. 写入指令台 + 任务看板
+    const tid=Date.now();
+    // 如果是招生类任务且标题含数字，自动加 [target:N][progress:0]
+    const _recruitKW=['招生','招人','学生','辅导师','招聘','招募'];
+    const _isRecruitTask=_recruitKW.some(kw=>(task.title||'').includes(kw)||(task.description||'').includes(kw));
+    const _numM=(task.title||'').match(/(\d+)/);
+    const _targetN=_isRecruitTask&&_numM?parseInt(_numM[1]):0;
+    const _targetPrefix=_targetN>0?('[target:'+_targetN+']\n[progress:0]\n'):'';
+    const btDesc=_targetPrefix+(tgMsgId?('[tg:'+tgMsgId+']\n'):'')+(task.description||'');
+    const bt={id:tid,title:task.title||'',assignee,deadline:task.deadline||null,priority:task.priority||'mid',description:btDesc,status:'in-progress',tg_sent:true,qidian_notified:true,created_at:new Date().toISOString()};
+    const insertRes=await SB.from('boss_tasks').insert([bt]);
+    if(insertRes.error) console.error('[boss_tasks insert 失败]',insertRes.error);
+    const taskRow={id:Date.now(),name:task.title||'',assignee,deadline:task.deadline||null,priority:task.priority||'mid',status:'in-progress',blocker:'',files:[],notes:task.description||'',project:proj==='其他'?null:proj,created_at:(task.deadline||new Date().toISOString().split('T')[0])};
+    SB.from('tasks').insert([taskRow]).select().then(function(res){
+      var ins=res.data;
+      if(ins&&ins[0]) window.dispatchEvent(new CustomEvent('walle_task_created',{detail:ins[0]}));
+    });
+
+    // 招生任务联动：韩笑主导时，吴晓磊同步写入任务 + 通知
+    const RECRUIT_KW=['招生','招人','学生','辅导师','辅导'];
+    const isRecruit=RECRUIT_KW.some(kw=>(task.title||'').includes(kw)||(task.description||'').includes(kw));
+    if(isRecruit&&assignee==='韩笑'){
+      const coworker='吴晓磊';
+      const coId=VC_MEMBERS[coworker];
+      const coRow={id:Date.now()+1,name:task.title||'',assignee:coworker,deadline:task.deadline||null,priority:task.priority||'mid',status:'in-progress',blocker:'',files:[],notes:'协同韩笑：'+(task.description||''),project:proj==='其他'?null:proj,created_at:(task.deadline||new Date().toISOString().split('T')[0])};
+      SB.from('tasks').insert([coRow]).select().then(function(res){
+        var ins=res.data;
+        if(ins&&ins[0]) window.dispatchEvent(new CustomEvent('walle_task_created',{detail:ins[0]}));
+      });
+      if(coId){
+        const coMsg='📋 *秦总任务指派（协同）*\n\n*'+(task.title||'')+'*\n📅 截止：'+dlStr+'\n优先级：'+pl+'\n与 韩笑 协同完成\n项目：'+projLabel+'\n\n请直接回复此消息汇报进展，奇点会转达给秦总 🙏';
+        qSend(coId,coMsg);
+      }
+    }
+
+    // 3. 通知老板
+    const coNote=(isRecruit&&assignee==='韩笑')?'（吴晓磊已同步跟进）':'';
+    const bossMsg=memberChatId
+      ?'📤 *奇点已通知 '+assignee+'*'+coNote+'\n\n任务：'+(task.title||'')+'\n项目：'+projLabel+'\n截止：'+dlStr+'\n\n等待对方回复进展...'
+      :'⚠️ *'+assignee+'* 尚未绑定 Telegram，任务已记录到指令台';
+    qSend(VC_BOSS,bossMsg);
+    // 4. 语音确认（speak 会自动恢复监听）
+    const coSpeak=(isRecruit&&assignee==='韩笑')?' 吴晓磊也会协同跟进。':'';
+    speak(memberChatId
+      ?'好的老板，任务已归入'+projLabel+'，奇点已通知'+assignee+'跟进。'+coSpeak
+      :'好的老板，任务已归入'+projLabel+'，已记录到指令台。');
+  };
+
+  const btnClass='vf-btn'+(phase==='rec'?' rec':'')+(phase==='proc'||phase==='talking'?' proc':'');
+  const statusClass='vf-status'+(phase==='rec'?' rec':'')+(phase==='proc'?' proc':'');
+
+  return(
+    <div className="vf-wrap">
+      {pendingTask&&(
+        <div className="proj-picker">
+          <div className="proj-picker-title">📋 任务已识别，选择所属项目：</div>
+          <div className="proj-picker-task">「{pendingTask.parsed.title||'（未命名）'}」→ {pendingTask.parsed.assignee||'待定'}</div>
+          <div className="proj-picker-btns">
+            {PROJECTS.map(function(p){return(
+              <button key={p} className="proj-picker-btn" onClick={function(){confirmProject(p);}}>{p}</button>
+            );})}
+            <button className="proj-picker-btn other" onClick={function(){confirmProject('其他');}}>📁 其他</button>
+          </div>
+        </div>
+      )}
+      <div className={statusClass}>{status}</div>
+      <button className={btnClass} onClick={handleClick}>
+        {phase==='idle'?'🎙️':phase==='proc'?'🤔':(
+          <div className="vf-bars">{bars.map((h,i)=><div key={i} className="vf-bar" style={{height:h+'px'}}/>)}</div>
+        )}
+      </button>
+    </div>
+  );
+}
+
+/* Task Form */
+function TaskForm({task,onSave,onClose}){
+  const [f,setF]=useState(task||{name:'',assignee:'',deadline:'',priority:'mid',status:'pending',blocker:'',files:[],notes:''});
+  const fileRef=useRef(null);
+  const set=(k,v)=>setF(p=>({...p,[k]:v}));
+  const onFile=e=>{const ns=Array.from(e.target.files).map(x=>x.name);setF(p=>({...p,files:[...p.files,...ns]}));};
+  const submit=e=>{e.preventDefault();if(!f.name.trim())return;onSave({...f,id:task?.id||Date.now(),createdAt:task?.createdAt||new Date().toISOString().split('T')[0]});};
+  return(
+    <div className="overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal">
+        <div className="modal-head">
+          <h2>{task?'编辑任务':'新建任务'}</h2>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+        </div>
+        <form onSubmit={submit}>
+          <div className="form-grid">
+            <div className="fg full"><label>任务名称 *</label><input type="text" placeholder="请输入任务名称" value={f.name} onChange={e=>set('name',e.target.value)} required/></div>
+            <div className="fg"><label>负责人</label><input type="text" placeholder="负责人姓名" value={f.assignee} onChange={e=>set('assignee',e.target.value)}/></div>
+            <div className="fg"><label>截止日期</label><input type="date" value={f.deadline} onChange={e=>set('deadline',e.target.value)}/></div>
+            <div className="fg"><label>优先级</label>
+              <select value={f.priority} onChange={e=>set('priority',e.target.value)}>
+                <option value="high">高优先级</option><option value="mid">中优先级</option><option value="low">低优先级</option>
+              </select>
+            </div>
+            <div className="fg"><label>完成状态</label>
+              <select value={f.status} onChange={e=>set('status',e.target.value)}>
+                <option value="pending">未开始</option><option value="in-progress">进行中</option><option value="completed">已完成</option><option value="blocked">已卡点</option>
+              </select>
+            </div>
+            <div className="fg"><label>所属项目</label>
+              <select value={f.project||''} onChange={e=>set('project',e.target.value||null)}>
+                <option value="">— 无 —</option>
+                {PROJECTS.map(p=><option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+            {f.status==='blocked'&&<div className="fg full"><label>卡点描述</label><textarea placeholder="描述卡点原因及所需支持..." value={f.blocker} onChange={e=>set('blocker',e.target.value)}/></div>}
+            <div className="fg full"><label>备注反馈</label><textarea placeholder="进展说明、备注信息..." value={f.notes} onChange={e=>set('notes',e.target.value)}/></div>
+            <div className="fg full"><label>上传交付文件</label>
+              <div className="file-zone" onClick={()=>fileRef.current?.click()}>
+                <input ref={fileRef} type="file" multiple style={{display:'none'}} onChange={onFile}/>
+                <div style={{color:'#16A34A',fontWeight:700,marginBottom:2}}>📎 点击上传交付文件</div>
+                <div style={{color:'#9CA3AF',fontSize:'.75rem'}}>支持多文件</div>
+              </div>
+              {f.files.length>0&&<div style={{marginTop:7}}>{f.files.map((n,i)=><span key={i} className="file-tag">📄 {n.length>22?n.slice(0,22)+'…':n}<span style={{cursor:'pointer',color:'#BE123C',marginLeft:3}} onClick={e=>{e.stopPropagation();setF(p=>({...p,files:p.files.filter((_,j)=>j!==i)}));}}>✕</span></span>)}</div>}
+            </div>
+          </div>
+          <div className="modal-foot">
+            <button type="button" className="btn btn-ghost" onClick={onClose}>取消</button>
+            <button type="submit" className="btn btn-primary">{task?'保存修改':'创建任务'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function Toast({msg,onClose}){
+  const isMsgNotif=msg&&(msg.startsWith('📩')||msg.startsWith('💰'));
+  useEffect(()=>{const t=setTimeout(onClose,isMsgNotif?5000:2500);return()=>clearTimeout(t);},[]);
+  return <div className="toast" style={isMsgNotif?{borderLeftColor:'#6366f1',background:'#f5f3ff'}:{}}>{isMsgNotif?'':'✓ '}{msg}</div>;
+}
+
+/* ===== Project Org Chart ===== */
+function ProjOrgChart({proj}){
+  const members=PROJECT_MEMBERS[proj]||[];
+  if(members.length===0) return null;
+  const leader=members.find(m=>m.leader);
+  const rest=members.filter(m=>!m.leader);
+  return(
+    <div className="proj-org">
+      <div className="proj-org-title">🏢 项目组织架构</div>
+      {leader&&(
+        <div className="proj-org-leader-wrap">
+          <div className="proj-org-node leader">
+            <div className="org-av">{leader.name.slice(0,1)}</div>
+            <div className="org-name">{leader.name}</div>
+            <div className="org-role">{leader.role}</div>
+          </div>
+        </div>
+      )}
+      {leader&&rest.length>0&&(
+        <div className="proj-org-connector">
+          <div className="proj-org-vline"/>
+          <div style={{width:'70%',height:2,background:'#BBF7D0'}}/>
+        </div>
+      )}
+      {rest.length>0&&(
+        <div className="proj-org-members-row">
+          {rest.map(m=>(
+            <div key={m.name} className="proj-org-node">
+              <div className="org-av">{m.name.slice(0,1)}</div>
+              <div className="org-name">{m.name}</div>
+              <div className="org-role">{m.role||'—'}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {!leader&&(
+        <div className="proj-org-members-row">
+          {members.map(m=>(
+            <div key={m.name||m} className="proj-org-node">
+              <div className="org-av">{(m.name||m).slice(0,1)}</div>
+              <div className="org-name">{m.name||m}</div>
+              <div className="org-role">{m.role||'—'}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ===== Project Body (org chart + member list) ===== */
+function ProjectBody({proj,persons,bossTasks,openPerson,setOpenPerson,statusDot,buildLog,S,onEdit,onDelete,section}){
+  const fixedRaw=PROJECT_MEMBERS[proj]||[];
+  const bts=bossTasks||[];
+
+  // 为某人从 boss_tasks 构建流水账
+  const buildBTLog=function(name){
+    var entries=[];
+    bts.forEach(function(bt){
+      var created=bt.created_at?new Date(bt.created_at).toLocaleString('zh-CN',{hour12:false,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).replace(/\//g,'-'):'';
+      // task creation entry belongs to the assignee
+      if(bt.assignee===name) entries.push({dot:'issue',text:'📋 下达任务：'+bt.title,time:created});
+      (bt.description||'').split('\n').filter(Boolean).forEach(function(line){
+        var m=line.match(/^\[([^\]]+)\]\s*(.+)/);
+        if(!m) return;
+        var time=m[1],content=m[2];
+        if(/回复[：:]/.test(content)){
+          // attribute reply to the actual replier extracted from content
+          var rm=content.match(/回复[：:](.+?)[:：]/);
+          var replier=rm?rm[1].trim():'';
+          if(replier===name) entries.push({dot:'reply',text:'💬 '+content,time:time});
+        } else if(/老板已阅/.test(content)){
+          // ack belongs to the task assignee
+          if(bt.assignee===name) entries.push({dot:'ack',text:'✅ '+content,time:time});
+        }
+      });
+    });
+    entries.sort(function(a,b){return a.time>b.time?1:-1;});
+    return entries;
+  };
+  const fixedNames=fixedRaw.map(function(m){return m.name||m;});
+  const taskNames=Object.keys(persons);
+  const seen={};
+  const allNames=[];
+  fixedNames.concat(taskNames).forEach(function(n){if(!seen[n]){seen[n]=1;allNames.push(n);}});
+
+  // --- org chart ---
+  const members=fixedRaw;
+  const leader=members.filter(function(m){return m.leader;})[0]||null;
+  const rest=members.filter(function(m){return !m.leader;});
+
+  return(
+    <div className="proj-body">
+      {section!=='progress'&&members.length>0&&(
+        <div className="proj-org">
+          <div className="proj-org-title">🏢 项目组织架构</div>
+          {leader&&(
+            <div style={{display:'flex',justifyContent:'center',marginBottom:0}}>
+              <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4}}>
+                <div style={{position:'relative'}}>
+                  <div style={{width:48,height:48,borderRadius:'50%',background:'linear-gradient(135deg,#F59E0B,#D97706)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'1rem',fontWeight:800,color:'#fff',boxShadow:'0 2px 8px rgba(245,158,11,.35)'}}>{leader.name.slice(0,1)}</div>
+                  <div className="pt-badge">PT{getPT(leader.name)}</div>
+                </div>
+                <div style={{fontSize:'.75rem',fontWeight:700,color:'#111827'}}>{leader.name}</div>
+                <div style={{fontSize:'.6rem',color:'#6B7280',textAlign:'center'}}>{leader.role}</div>
+              </div>
+            </div>
+          )}
+          {leader&&rest.length>0&&(
+            <div style={{display:'flex',flexDirection:'column',alignItems:'center',margin:'4px 0'}}>
+              <div style={{width:2,height:14,background:'#BBF7D0'}}/>
+              <div style={{width:'70%',height:2,background:'#BBF7D0'}}/>
+            </div>
+          )}
+          {rest.length>0&&(
+            <div style={{display:'flex',justifyContent:'center',gap:10,flexWrap:'wrap',padding:'0 4px'}}>
+              {rest.map(function(m){return(
+                <div key={m.name} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4,minWidth:60}}>
+                  <div style={{position:'relative'}}>
+                    <div style={{width:40,height:40,borderRadius:'50%',background:'linear-gradient(135deg,#22C55E,#16A34A)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'.9rem',fontWeight:800,color:'#fff'}}>{m.name.slice(0,1)}</div>
+                    <div className="pt-badge">PT{getPT(m.name)}</div>
+                  </div>
+                  <div style={{fontSize:'.72rem',fontWeight:700,color:'#111827'}}>{m.name}</div>
+                  <div style={{fontSize:'.6rem',color:'#6B7280',textAlign:'center',maxWidth:68,lineHeight:1.3}}>{m.role||'—'}</div>
+                </div>
+              );})}
+            </div>
+          )}
+          {!leader&&members.length>0&&(
+            <div style={{display:'flex',justifyContent:'center',gap:10,flexWrap:'wrap',padding:'0 4px'}}>
+              {members.map(function(m){return(
+                <div key={m.name||m} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4,minWidth:60}}>
+                  <div style={{position:'relative'}}>
+                    <div style={{width:40,height:40,borderRadius:'50%',background:'linear-gradient(135deg,#22C55E,#16A34A)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'.9rem',fontWeight:800,color:'#fff'}}>{(m.name||m).slice(0,1)}</div>
+                    <div className="pt-badge">PT{getPT(m.name||m)}</div>
+                  </div>
+                  <div style={{fontSize:'.72rem',fontWeight:700,color:'#111827'}}>{m.name||m}</div>
+                  <div style={{fontSize:'.6rem',color:'#6B7280',textAlign:'center',maxWidth:68,lineHeight:1.3}}>{m.role||'—'}</div>
+                </div>
+              );})}
+            </div>
+          )}
+        </div>
+      )}
+      {/* --- 目标任务进度条（仅 progress 视图） --- */}
+      {section==='progress'&&(function(){
+        var targetBts=bts.filter(function(bt){return /\[target:\d+\]/.test(bt.description||'');});
+        if(targetBts.length===0) return null;
+        return React.createElement('div',{style:{marginBottom:14}},
+          React.createElement('div',{className:'proj-org-section-title'},'🎯 目标任务进度'),
+          targetBts.map(function(bt){
+            var desc=bt.description||'';
+            var tM=desc.match(/\[target:(\d+)\]/);
+            var pM=desc.match(/\[progress:(\d+)\]/);
+            var target=tM?parseInt(tM[1]):0;
+            var progress=pM?parseInt(pM[1]):0;
+            var pct=target>0?Math.min(100,Math.round(progress/target*100)):0;
+            return React.createElement('div',{key:bt.id,style:{background:'#fff',borderRadius:10,padding:'10px 12px',marginBottom:8,border:'1px solid #E5E7EB'}},
+              React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}},
+                React.createElement('div',{style:{fontSize:'.8rem',fontWeight:700,color:'#111827'}},bt.title),
+                React.createElement('div',{style:{fontSize:'.72rem',color:'#6B7280'}},bt.assignee)
+              ),
+              React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8}},
+                React.createElement('div',{style:{flex:1,height:8,background:'#F3F4F6',borderRadius:4,overflow:'hidden'}},
+                  React.createElement('div',{style:{width:pct+'%',height:'100%',background:pct>=80?'#10B981':pct>=40?'#F59E0B':'#3B82F6',borderRadius:4,transition:'width .4s'}})
+                ),
+                React.createElement('div',{style:{fontSize:'.72rem',fontWeight:700,color:'#374151',minWidth:70,textAlign:'right'}},
+                  progress+'/'+target+' （'+pct+'%）'
+                )
+              )
+            );
+          })
+        );
+      })()}
+      {/* --- member task list --- */}
+      {section!=='org'&&allNames.length>0&&<div className="proj-org-section-title">📋 成员工作任务 &amp; 进度</div>}
+      {section!=='org'&&allNames.length===0&&<div style={{textAlign:'center',padding:'18px 0',color:'#9CA3AF',fontSize:'.82rem'}}>🗂️ 暂无任务，可在新建任务时选择此项目</div>}
+      {section!=='org'&&allNames.map(function(name){
+        var memberInfo=fixedRaw.filter(function(m){return (m.name||m)===name;})[0]||null;
+        var role=memberInfo&&memberInfo.role||'';
+        var ptasks=persons[name]||[];
+        var pkey=proj+'|'+name;
+        var isPersonOpen=openPerson===pkey;
+        var pDone=ptasks.filter(function(t){return t.status==='completed';}).length;
+        var pBlock=ptasks.filter(function(t){return t.status==='blocked';}).length;
+        // 计算完成百分比：优先用 boss_tasks 的 progress/target（关联PT），否则用任务完成数
+        var pctLabel=(function(){
+          var bt=(bts||[]).filter(function(b){return b.assignee===name&&/\[target:\d+\]/.test(b.description||'');}).sort(function(a,b){return b.id-a.id;})[0];
+          if(bt){
+            var tM=(bt.description||'').match(/\[target:(\d+)\]/);
+            var pM=(bt.description||'').match(/\[progress:(\d+)\]/);
+            var target=tM?parseInt(tM[1]):0;
+            var prog=pM?parseInt(pM[1]):0;
+            if(target>0) return Math.round(prog/target*100)+'%';
+          }
+          if(ptasks.length>0) return Math.round(pDone/ptasks.length*100)+'%';
+          return null;
+        })();
+        return(
+          <div key={pkey} className="person-card">
+            <div className="person-card-hd" onClick={function(){setOpenPerson(isPersonOpen?null:pkey);}}>
+              <div style={{position:'relative',flexShrink:0}}>
+                <div className="person-avatar">{name.slice(0,1)}</div>
+                <div className="pt-badge">PT{getPT(name)}</div>
+              </div>
+              <div className="person-info">
+                <div className="person-name">{name}{role?React.createElement('span',{style:{fontSize:'.6rem',color:'#6B7280',fontWeight:400,marginLeft:5}},role):null}</div>
+                <div className="person-tasks-cnt">{ptasks.length>0?(ptasks.length+'项任务 · 完成'+(pctLabel||pDone)+(pBlock>0?' · ⚠️'+pBlock+'卡点':'')):'暂无任务'}</div>
+              </div>
+              <div className="person-status-dots">
+                {ptasks.map(function(t){return React.createElement('span',{key:t.id,style:{width:8,height:8,borderRadius:'50%',background:statusDot(t.status),display:'inline-block'},title:t.name});})
+                }
+                {ptasks.length===0&&React.createElement('span',{style:{fontSize:'.65rem',color:'#D1D5DB'}},'—')}
+              </div>
+            </div>
+            {isPersonOpen&&(
+              <div className="person-card-body">
+                {(function(){
+                  var btLog=buildBTLog(name);
+                  if(ptasks.length===0&&btLog.length===0) return React.createElement('div',{style:{padding:'10px 13px',color:'#9CA3AF',fontSize:'.8rem'}},'暂无互动记录');
+                  if(ptasks.length===0&&btLog.length>0) return React.createElement('div',{className:'person-task-log',style:{margin:'8px 10px 8px'}},
+                    React.createElement('div',{style:{fontSize:'.68rem',fontWeight:700,color:'#374151',marginBottom:6}},'📜 交互记录'),
+                    btLog.map(function(l,i){return React.createElement('div',{key:i,style:{display:'flex',gap:6,marginBottom:4}},
+                      React.createElement('span',{style:{color:l.dot==='reply'?'#3B82F6':l.dot==='ack'?'#22C55E':l.dot==='issue'?'#F59E0B':'#9CA3AF',flexShrink:0}},'•'),
+                      React.createElement('span',{style:{flex:1,fontSize:'.7rem'}},''+l.text),
+                      l.time&&React.createElement('span',{style:{color:'#D1D5DB',fontSize:'.6rem',whiteSpace:'nowrap'}},l.time)
+                    );})
+                  );
+                  return null;
+                })()}
+                {ptasks.length>0&&(function(){
+                  var btLog=buildBTLog(name);
+                  if(btLog.length===0) return null;
+                  return React.createElement('div',{className:'person-task-log',style:{margin:'0 10px 8px'}},
+                    React.createElement('div',{style:{fontSize:'.68rem',fontWeight:700,color:'#374151',marginBottom:6}},'📜 交互记录'),
+                    btLog.map(function(l,i){return React.createElement('div',{key:i,style:{display:'flex',gap:6,marginBottom:4}},
+                      React.createElement('span',{style:{color:l.dot==='reply'?'#3B82F6':l.dot==='ack'?'#22C55E':l.dot==='issue'?'#F59E0B':'#9CA3AF',flexShrink:0}},'•'),
+                      React.createElement('span',{style:{flex:1,fontSize:'.7rem'}},''+l.text),
+                      l.time&&React.createElement('span',{style:{color:'#D1D5DB',fontSize:'.6rem',whiteSpace:'nowrap'}},l.time)
+                    );})
+                  );
+                })()}
+                {ptasks.map(function(t){
+                  var logs=buildLog(t);
+                  return(
+                    <div key={t.id}>
+                      <div className="person-task-row">
+                        <span style={{width:8,height:8,borderRadius:'50%',background:statusDot(t.status),display:'inline-block',flexShrink:0}}/>
+                        <span className="person-task-name">{t.name}</span>
+                        <span className={'badge '+(S[t.status]?S[t.status].cls:'')} style={{fontSize:'.6rem'}}>{S[t.status]?S[t.status].emoji:''} {S[t.status]?S[t.status].label:''}</span>
+                        {(onEdit||onDelete)&&(
+                          <div className="person-task-actions">
+                            {onEdit&&<button className="pt-edit" onClick={e=>{e.stopPropagation();onEdit(t);}}>编辑</button>}
+                            {onDelete&&<button className="pt-del" onClick={e=>{e.stopPropagation();if(confirm('确认删除「'+t.name+'」？'))onDelete(t.id);}}>删除</button>}
+                          </div>
+                        )}
+                      </div>
+                      {logs.length>1&&(
+                        <div className="person-task-log">
+                          {logs.map(function(l,i){return(
+                            <div key={i} style={{display:'flex',gap:6,marginBottom:3}}>
+                              <span style={{color:l.dot==='blocked'?'#E11D48':l.dot==='note'?'#3B82F6':'#9CA3AF',flexShrink:0}}>•</span>
+                              <span style={{flex:1}}>{l.text}</span>
+                              {l.time&&<span style={{color:'#D1D5DB',fontSize:'.6rem',whiteSpace:'nowrap'}}>{l.time}</span>}
+                            </div>
+                          );})}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ===== Project Finance Inline (drawer — 实时从 Supabase 读取) ===== */
+function ProjectFinanceInline({proj}){
+  const [records,setRecords]=useState(null); // null=loading, []=empty
+  const [err,setErr]=useState(null);
+
+  const load=()=>{
+    setErr(null);
+    SB.from('finance_records')
+      .select('*')
+      .eq('project',proj)
+      .order('created_at',{ascending:false})
+      .limit(50)
+      .then(({data,error})=>{
+        if(error){setErr('数据加载失败');setRecords([]);}
+        else setRecords(data||[]);
+      });
+  };
+  useEffect(()=>{
+    load();
+    const t=setInterval(load,30000);
+    return()=>clearInterval(t);
+  },[proj]);
+
+  if(records===null) return <div style={{padding:'24px',textAlign:'center',color:'#9CA3AF',fontSize:'.8rem'}}>⏳ 加载中...</div>;
+
+  const income=records.filter(r=>r.type==='income').reduce((s,r)=>s+(Number(r.amount)||0),0);
+  const expense=records.filter(r=>r.type==='expense').reduce((s,r)=>s+(Number(r.amount)||0),0);
+  const net=income-expense;
+  const fmt=n=>n>=10000?(n/10000).toFixed(1)+'万':n.toLocaleString();
+
+  if(records.length===0) return(
+    <div style={{padding:'28px 16px',textAlign:'center'}}>
+      <div style={{fontSize:'2rem',marginBottom:8}}>💰</div>
+      <div style={{color:'#6B7280',fontSize:'.82rem',fontWeight:600}}>暂无财务记录</div>
+      <div style={{color:'#9CA3AF',fontSize:'.7rem',marginTop:4}}>成员向奇点汇报收支后，数据将自动录入</div>
+    </div>
+  );
+
+  const kpis=[
+    {icon:'📈',label:'总收入',val:'¥'+fmt(income),cls:'green',color:'#16A34A'},
+    {icon:'📉',label:'总支出',val:'¥'+fmt(expense),cls:'red',color:'#DC2626'},
+    {icon:'💎',label:'净收益',val:(net>=0?'+':'')+'¥'+fmt(Math.abs(net)),cls:net>=0?'blue':'red',color:net>=0?'#1D4ED8':'#DC2626'},
+    {icon:'📑',label:'记录条数',val:records.length+'条',cls:'amber',color:'#92400E'},
+  ];
+
+  const typeIcon=t=>t==='income'?{icon:'💰',bg:'#F0FDF4'}:{icon:'💸',bg:'#FFF7F7'};
+
+  return(
+    <div style={{padding:'12px 14px'}}>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:8,marginBottom:12}}>
+        {kpis.map((k,i)=>(
+          <div key={i} className={`fin-kpi ${k.cls}`} style={{padding:'10px 12px',borderRadius:12}}>
+            <div style={{fontSize:'.85rem'}}>{k.icon}</div>
+            <div style={{fontSize:'1rem',fontWeight:800,color:k.color,lineHeight:1.1,margin:'2px 0'}}>{k.val}</div>
+            <div style={{fontSize:'.6rem',color:'#9CA3AF'}}>{k.label}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{background:'#fff',borderRadius:12,padding:'10px 12px',boxShadow:'0 1px 6px rgba(0,0,0,.05)'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+          <div style={{fontSize:'.72rem',fontWeight:700,color:'#111827'}}>🧾 流水明细</div>
+          <button onClick={load} style={{fontSize:'.6rem',color:'#6B7280',background:'none',border:'none',cursor:'pointer'}}>↻ 刷新</button>
+        </div>
+        {err&&<div style={{color:'#DC2626',fontSize:'.7rem',textAlign:'center',padding:8}}>{err}</div>}
+        {records.map((r,i)=>{
+          const ti=typeIcon(r.type);
+          const dt=r.created_at?new Date(r.created_at).toLocaleDateString('zh-CN'):'';
+          return(
+            <div key={r.id||i} className="fin-tx" style={{padding:'7px 0'}}>
+              <div className="fin-tx-icon" style={{background:ti.bg,width:28,height:28,borderRadius:8,fontSize:'.85rem'}}>{ti.icon}</div>
+              <div className="fin-tx-info">
+                <div style={{fontSize:'.72rem',fontWeight:600,color:'#111827'}}>{r.category||r.note||'—'}</div>
+                <div style={{fontSize:'.6rem',color:'#9CA3AF'}}>{dt}{r.reporter?' · '+r.reporter:''}</div>
+              </div>
+              <div style={{fontSize:'.76rem',fontWeight:700,color:r.type==='income'?'#16A34A':'#DC2626',whiteSpace:'nowrap'}}>
+                {r.type==='income'?'+':'-'}¥{fmt(Number(r.amount)||0)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ===== Task Drawer ===== */
+function TaskDrawer({tasks,bossTasks=[],filter,onClose,onEdit,onDelete}){
+  const [openProj,setOpenProj]=useState(new Set()); // 默认全收起，点击才展开
+  const [openPerson,setOpenPerson]=useState(null); // 展开的人员key "项目|姓名"
+  const [openSection,setOpenSection]=useState({}); // {proj: 'org'|'finance'|'progress'|null}
+  const toggleSection=(proj,sec)=>setOpenSection(p=>({...p,[proj]:p[proj]===sec?null:sec}));
+
+  const titleMap={all:'全部任务',completed:'已完成','in-progress':'进行中',blocked:'已卡点',overdue:'逾期中'};
+  const today=new Date();
+
+  // 筛选
+  const filtered=filter==='all'?tasks
+    :filter==='overdue'?tasks.filter(t=>t.status!=='completed'&&t.deadline&&new Date(t.deadline)<today)
+    :tasks.filter(t=>t.status===filter);
+
+  // 按项目分组：无项目或不在列表里的，归入 '其他'
+  const groups={};
+  PROJECTS.forEach(p=>{groups[p]=[];});
+  groups['其他']=[];
+  filtered.forEach(t=>{
+    const p=t.project&&PROJECTS.includes(t.project)?t.project:'其他';
+    groups[p].push(t);
+  });
+
+  // 项目内按人分组
+  const byPerson=(taskList)=>{
+    const map={};
+    taskList.forEach(t=>{
+      const key=t.assignee||'未分配';
+      if(!map[key]) map[key]=[];
+      map[key].push(t);
+    });
+    return map;
+  };
+
+  // 构建进展日志
+  const buildLog=(t)=>{
+    const logs=[];
+    const fmt=d=>d?new Date(d).toLocaleDateString('zh-CN'):'';
+    logs.push({dot:'pending',text:`创建 → 分配给 ${t.assignee||'—'}`,time:fmt(t.createdAt)});
+    if(t.notes) t.notes.split('\n').filter(Boolean).forEach(line=>{
+      const m=line.match(/^\[(.+?)\]\s*(.+)/);
+      logs.push({dot:'note',text:m?m[2]:line,time:m?m[1]:''});
+    });
+    if(t.blocker) logs.push({dot:'blocked',text:`🚧 ${t.blocker}`,time:''});
+    if(t.status==='completed') logs.push({dot:'',text:'✅ 已完成',time:fmt(t.deadline)});
+    return logs;
+  };
+
+  const statusDot=(s)=>({completed:'#22C55E','in-progress':'#3B82F6',blocked:'#E11D48',pending:'#9CA3AF'}[s]||'#9CA3AF');
+
+  const projOrder=[...PROJECTS,'其他'];
+  const toggleProj=(proj)=>{
+    setOpenProj(prev=>{
+      const next=new Set(prev);
+      next.has(proj)?next.delete(proj):next.add(proj);
+      return next;
+    });
+  };
+
+  return(
+    <div className="drawer-overlay" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div className="drawer">
+        <div className="drawer-head">
+          <div className="drawer-title">
+            <span>{{all:'📋',completed:'✅','in-progress':'🔄',blocked:'🚧',overdue:'⏰'}[filter]||'📋'}</span>
+            {titleMap[filter]||filter}
+            <span style={{fontSize:'.75rem',fontWeight:400,color:'#9CA3AF'}}>（{filtered.length}项）</span>
+          </div>
+          <button className="drawer-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="drawer-body">
+          {projOrder.map(proj=>{
+            const pts=groups[proj]||[];
+            const isNamed=PROJECTS.includes(proj); // w / 理享招生项目
+            // '其他' 无任务时不显示
+            if(!isNamed&&pts.length===0) return null;
+            const isOpen=openProj.has(proj);
+            const doneN=pts.filter(t=>t.status==='completed').length;
+            const blockN=pts.filter(t=>t.status==='blocked').length;
+            const persons=byPerson(pts);
+            return(
+              <div key={proj} className="proj-group">
+                <div className={`proj-group-hd${isOpen?' open':''}`} onClick={()=>toggleProj(proj)}>
+                  <div className="proj-name">
+                    <span>{isNamed?'🗂️':'📁'}</span>
+                    {proj}
+                    {pts.length>0&&<span className={`proj-badge${blockN>0?' block':doneN===pts.length?' ':' warn'}`}>
+                      {doneN}/{pts.length} 完成
+                    </span>}
+                    {isNamed&&pts.length===0&&<span className="proj-badge" style={{background:'#E5E7EB',color:'#6B7280'}}>待分配</span>}
+                    {blockN>0&&<span className="proj-badge block">⚠️ {blockN}卡点</span>}
+                  </div>
+                  <span className={`proj-chevron${isOpen?' open':''}`}>▶</span>
+                </div>
+                {isOpen&&(
+                  <div>
+                    {[{sec:'org',icon:'🏢',label:'项目组织架构'},{sec:'finance',icon:'💰',label:'财务情况'},{sec:'progress',icon:'📊',label:'工作进度'}].map(({sec,icon,label})=>{
+                      const isSecOpen=openSection[proj]===sec;
+                      return(
+                        <div key={sec}>
+                          <div className="proj-sub-hd" onClick={()=>toggleSection(proj,sec)}>
+                            <span className="sub-icon">{icon}</span>
+                            <span className="sub-label">{label}</span>
+                            <span className={`proj-chevron${isSecOpen?' open':''}`}>▶</span>
+                          </div>
+                          {isSecOpen&&(
+                            <div className="proj-sub-body">
+                              {sec==='org'&&React.createElement(ProjectBody,{proj,persons,bossTasks,openPerson,setOpenPerson,statusDot,buildLog,S,onEdit,onDelete,section:'org'})}
+                              {sec==='finance'&&React.createElement(ProjectFinanceInline,{proj})}
+                              {sec==='progress'&&React.createElement(ProjectBody,{proj,persons,bossTasks,openPerson,setOpenPerson,statusDot,buildLog,S,onEdit,onDelete,section:'progress'})}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ===== Org Chart Data ===== */
+const ORG=[
+  {id:1, name:'秦文浩',title:'董事长',    dept:'董事长办公室',  org:'信华总部',pid:null,lv:9,cls:'最高指挥官',tgId:null},
+  {id:2, name:'朱妍莉',title:'总经理',    dept:'诚联科技事业部',org:'信华总部',pid:1,  lv:8,cls:'战区司令',  tgId:null},
+  {id:3, name:'巢峰',  title:'战略总裁',  dept:'董办',         org:'信华总部',pid:1,  lv:8,cls:'智囊首席',  tgId:null},
+  {id:4, name:'张慧',  title:'审计部长',  dept:'审计部',       org:'信华总部',pid:1,  lv:7,cls:'稽核精英',  tgId:null},
+  {id:5, name:'刘菲',  title:'经营总监',  dept:'经营管理平台', org:'信华总部',pid:1,  lv:7,cls:'经营王牌',  tgId:null},
+  {id:6, name:'陈伟',  title:'资源总监',  dept:'战略资源部',   org:'信华总部',pid:1,  lv:7,cls:'资源猎手',  tgId:null},
+  {id:7, name:'张娜娜',title:'人才总监',  dept:'战略人才部',   org:'信华总部',pid:1,  lv:7,cls:'人才伯乐',  tgId:'8482000777'},
+  {id:8, name:'徐媛',  title:'人事总监',  dept:'人事总务平台', org:'信华总部',pid:1,  lv:7,cls:'团队守护',  tgId:null},
+  {id:9, name:'张朝强',title:'财务总监',  dept:'财务管理平台', org:'信华总部',pid:1,  lv:7,cls:'财富法师',  tgId:null},
+  {id:10,name:'骆天虹',title:'总经理',    dept:'信华企服事业部',org:'信华总部',pid:1,  lv:8,cls:'战区司令',  tgId:null},
+  {id:11,name:'汪汛',  title:'董事长助理',dept:'董办',         org:'信华总部',pid:1,  lv:6,cls:'机要参谋',  tgId:null},
+  {id:12,name:'王杰',  title:'法律总监',  dept:'法律部',       org:'信华总部',pid:1,  lv:7,cls:'法律卫士',  tgId:null},
+  {id:13,name:'王理群',title:'副总经理',  dept:'诚联科技事业部',org:'信华总部',pid:2,  lv:7,cls:'副指挥官',  tgId:null},
+  {id:14,name:'陈冬梅',title:'财务副总监',dept:'财务管理平台', org:'信华总部',pid:9,  lv:6,cls:'财务先锋',  tgId:'8527399930'},
+  {id:15,name:'王寿忠',title:'副总经理',  dept:'信华企服事业部',org:'信华总部',pid:10, lv:7,cls:'副指挥官',  tgId:null},
+  {id:16,name:'韩笑',  title:'副总经理',  dept:'总经办',       org:'理享前程', pid:null,lv:7,cls:'副指挥官',  tgId:null},
+  {id:17,name:'王玟',  title:'神秘人',    dept:'???',          org:'???',      pid:null,lv:6,cls:'详情不详',  tgId:'7885643514'},
+  {id:18,name:'吴晓磊',title:'技术顾问',  dept:'独立顾问',     org:'外部',     pid:null,lv:7,cls:'顾问大佬',  tgId:'8759710763'},
+];
+
+const LVC={9:'#F59E0B',8:'#8B5CF6',7:'#3B82F6',6:'#10B981'};
+const TGS=['none','online','away','offline'];
+const TGC={none:'#374151',online:'#10B981',away:'#F59E0B',offline:'#6B7280'};
+const TGL={none:'未绑定',online:'在线',away:'离开',offline:'离线'};
+
+function nameClr(n){
+  const c=['#7C3AED','#DC2626','#2563EB','#0891B2','#059669','#D97706','#DB2777','#4338CA'];
+  let h=0;for(const x of n)h=(h*31+x.charCodeAt(0))%c.length;return c[h];
+}
+
+function OrgCard({m,onTg}){
+  const lc=LVC[m.lv]||'#6B7280';
+  // 已绑定 tgId 的默认在线，否则未绑定
+  const tgSt=m.tgSt||(m.tgId?'online':'none');
+  const tc=TGC[tgSt];
+  const stars='★'.repeat(Math.min(m.lv-5,4))+'☆'.repeat(Math.max(0,4-(m.lv-5)));
+  return(
+    <div className="og-card" style={{borderColor:lc+'55',boxShadow:`0 0 16px ${lc}1a`}}>
+      <div className="og-card-top">
+        <div className="og-avatar" style={{background:nameClr(m.name)}}>{m.name[0]}</div>
+        <div className="og-tgdot" style={{background:tc,boxShadow:tgSt==='online'?`0 0 6px ${tc}`:''}}
+          onClick={e=>{e.stopPropagation();onTg(m.id);}} title={m.tgId?`✅ 已绑定奇点 · Telegram: ${TGL[tgSt]}`:`未绑定奇点`}/>
+        <div className="pt-badge" style={{right:'auto',left:-8,top:-6}}>PT{getPT(m.name)}</div>
+      </div>
+      <div className="og-name">{m.name}</div>
+      <div className="og-pos">{m.title}</div>
+      <div className="og-dept">{m.dept}</div>
+      <div className="og-cls">{m.cls}</div>
+      {m.tgId&&<div style={{fontSize:'.55rem',color:'#10B981',marginBottom:3}}>⚡ 奇点已绑定</div>}
+      <div className="og-xpbar"><div className="og-xpfill" style={{width:`${(m.lv-5)/4*100}%`,background:lc}}/></div>
+    </div>
+  );
+}
+
+function MobileOrgList({m,all,onTg,depth=0}){
+  const ch=all.filter(x=>x.pid===m.id);
+  const [open,setOpen]=useState(depth<1);
+  const lc=LVC[m.lv]||'#6B7280';
+  const tgSt=m.tgSt||(m.tgId?'online':'none');
+  return(
+    <div>
+      <div className="og-mitem" style={{borderLeftColor:lc+'60',borderLeftWidth:3}}
+        onClick={()=>ch.length&&setOpen(o=>!o)}>
+        <div style={{position:'relative',flexShrink:0}}>
+          <div className="og-mavatar" style={{background:nameClr(m.name)}}>{m.name[0]}</div>
+          <div className="pt-badge">PT{getPT(m.name)}</div>
+        </div>
+        <div className="og-minfo">
+          <div className="og-mname">{m.name}{m.tgId&&<span style={{fontSize:'.55rem',color:'#10B981',marginLeft:5}}>⚡绑定</span>}</div>
+          <div className="og-mtitle" style={{color:lc}}>{m.title}</div>
+          <div className="og-mdept">{m.dept} · <span className="og-mcls">{m.cls}</span></div>
+        </div>
+        <div className="og-mright">
+          <div className="og-tgdot" style={{background:TGC[tgSt],boxShadow:tgSt==='online'?`0 0 6px ${TGC[tgSt]}`:''}}
+            onClick={e=>{e.stopPropagation();onTg(m.id);}} title={m.tgId?`✅ 奇点已绑定`:`未绑定`}/>
+          {ch.length>0&&<div className="og-mexpand">{open?'▲':'▼'}</div>}
+        </div>
+      </div>
+      {open&&ch.length>0&&(
+        <div className="og-mchildren" style={{borderLeft:`2px solid ${lc}30`}}>
+          {ch.map(c=><MobileOrgList key={c.id} m={c} all={all} onTg={onTg} depth={depth+1}/>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OrgBranch({m,all,onTg}){
+  const ch=all.filter(x=>x.pid===m.id);
+  return(
+    <div className="og-branch">
+      <OrgCard m={m} onTg={onTg}/>
+      {ch.length>0&&(
+        <><div className="og-vline"/><div className="og-children">
+          {ch.map(c=><div key={c.id} className="og-cslot"><OrgBranch m={c} all={all} onTg={onTg}/></div>)}
+        </div></>
+      )}
+    </div>
+  );
+}
+
+function OrgPage(){
+  const [mbrs,setMbrs]=useState(()=>ORG.map(m=>({...m,tgSt:'none'})));
+  useEffect(()=>{
+    SB.from('org_members').select('*').then(({data})=>{
+      if(data&&data.length>0) setMbrs(prev=>prev.map(m=>{
+        const r=data.find(d=>d.id===m.id);
+        return r?{...m,tgSt:r.tg_status||'none'}:m;
+      }));
+    });
+  },[]);
+
+  const toggleTg=id=>setMbrs(p=>p.map(m=>{
+    if(m.id!==id)return m;
+    const i=(TGS.indexOf(m.tgSt||'none')+1)%TGS.length;
+    const ns=TGS[i];
+    SB.from('org_members').upsert({id:m.id,tg_status:ns});
+    return{...m,tgSt:ns};
+  }));
+
+  const online=mbrs.filter(m=>m.tgSt==='online'||(m.tgSt==='none'&&m.tgId)).length;
+  // 独立节点（神秘人 / 外部顾问）：pid:null 且 org 不在主组织
+  const standalone=mbrs.filter(m=>!m.pid&&m.org!=='信华总部'&&m.org!=='理享前程');
+  // 正式组织
+  const orgs=[...new Set(ORG.filter(m=>m.org==='信华总部'||m.org==='理享前程').map(m=>m.org))];
+  const [isMobile,setIsMobile]=useState(()=>window.innerWidth<700);
+  useEffect(()=>{const h=()=>setIsMobile(window.innerWidth<700);window.addEventListener('resize',h);return()=>window.removeEventListener('resize',h);},[]);
+
+  return(
+    <div className="og-page">
+      <div className="og-hdr">
+        <div className="og-hdr-title">⚔ 战队图谱</div>
+        <div className="og-hdr-sub">
+          <span style={{color:'#94A3B8'}}>成员 {mbrs.length} 人</span>
+          <span style={{color:'#334155'}}>·</span>
+          <span className="og-online-badge">在线 {online}</span>
+        </div>
+        <div className="og-hdr-hint">点击头像右上角圆点 · 切换 Telegram 状态</div>
+      </div>
+
+      <div className="og-sections">
+        {/* 正式组织架构 */}
+        {orgs.map(org=>{
+          const gm=mbrs.filter(m=>m.org===org);
+          const roots=gm.filter(m=>!m.pid);
+          const orgIcon=org==='信华总部'?'🏢':'🌟';
+          return(
+            <div key={org} style={{width:'100%'}}>
+              <div className="og-sec-lbl">{orgIcon} {org}</div>
+              {isMobile?(
+                <div className="og-mlist">
+                  {roots.map(r=><MobileOrgList key={r.id} m={r} all={gm} onTg={toggleTg}/>)}
+                </div>
+              ):(
+                <div className="og-scroll">
+                  <div className="og-tree-wrap">
+                    {roots.map(r=><OrgBranch key={r.id} m={r} all={gm} onTg={toggleTg}/>)}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* 独立节点：神秘人 & 外部顾问 */}
+        {standalone.length>0&&(
+          <div style={{width:'100%'}}>
+            <div className="og-sec-lbl" style={{color:'#475569'}}>✦ 独立节点</div>
+            <div style={{display:'flex',gap:24,flexWrap:'wrap',justifyContent:'center'}}>
+              {standalone.map(m=>(
+                <div key={m.id} style={{position:'relative'}}>
+                  {/* 虚线边框容器 */}
+                  <div style={{
+                    border:'1.5px dashed rgba(245,158,11,.35)',
+                    borderRadius:16,padding:'6px 6px 4px',
+                    background:'rgba(245,158,11,.04)',
+                  }}>
+                    <OrgCard m={m} onTg={toggleTg}/>
+                  </div>
+                  <div style={{textAlign:'center',fontSize:'.58rem',color:'#334155',marginTop:5,letterSpacing:1}}>
+                    {m.name==='王玟'?'— 神秘人 —':'— 独立顾问 —'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ===== Home Page ===== */
+function HomePage({tasks,onNav}){
+  const [phase,setPhase]=useState('idle'); // for robot mouth sync — shares state via window event
+  return(
+    <div className="home-page">
+      <div style={{textAlign:'center',marginBottom:28}}>
+        <div className="home-badge">SINGULARITY WORKSPACE</div>
+        <div className="home-title">奇点工作台</div>
+        <div className="home-sub">老板的智能工作中枢</div>
+      </div>
+      {/* WALL-E — large centered */}
+      <Avatar tasks={tasks} large={true}/>
+      {/* Nav Cards */}
+      <div className="home-nav-grid">
+        <div className="home-nav-card c1" onClick={()=>onNav('tasks')}>
+          <div className="home-nav-icon">📋</div>
+          <div className="home-nav-label">任务看板</div>
+          <div className="home-nav-sub">任务追踪 · 进度管理</div>
+        </div>
+        <div className="home-nav-card c2" onClick={()=>onNav('finance')}>
+          <div className="home-nav-icon">💰</div>
+          <div className="home-nav-label">财务看板</div>
+          <div className="home-nav-sub">营收 · 支出 · 利润</div>
+        </div>
+        <div className="home-nav-card c3" onClick={()=>onNav('org')}>
+          <div className="home-nav-icon">⚔</div>
+          <div className="home-nav-label">战队图谱</div>
+          <div className="home-nav-sub">团队架构 · 成员状态</div>
+        </div>
+        <div className="home-nav-card c4" onClick={()=>onNav('unknown')}>
+          <div className="home-nav-icon">🌌</div>
+          <div className="home-nav-label">敬请期待</div>
+          <div className="home-nav-sub">构想中...</div>
+        </div>
+        <div className="home-nav-card c3" onClick={()=>onNav('leaderboard')} style={{background:'linear-gradient(135deg,#1E1B4B,#312E81)'}}>
+          <div className="home-nav-icon">⚡</div>
+          <div className="home-nav-label">龙虎榜</div>
+          <div className="home-nav-sub">PT积分排名</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ===== Finance Page ===== */
+function FinancePage({onBack}){
+  const [records,setRecords]=useState(null);
+  const [filterProj,setFilterProj]=useState('all');
+
+  const load=()=>{
+    let q=SB.from('finance_records').select('*').order('created_at',{ascending:false}).limit(200);
+    setRecords(null);
+    q.then(({data,error})=>setRecords(error?[]:data||[]));
+  };
+  useEffect(()=>{load();},[]);
+
+  const fmt=n=>n>=10000?(n/10000).toFixed(1)+'万':n.toLocaleString();
+  const display=records===null?[]:filterProj==='all'?records:records.filter(r=>r.project===filterProj);
+  const income=display.filter(r=>r.type==='income').reduce((s,r)=>s+(Number(r.amount)||0),0);
+  const expense=display.filter(r=>r.type==='expense').reduce((s,r)=>s+(Number(r.amount)||0),0);
+  const net=income-expense;
+
+  const kpis=[
+    {icon:'📈',label:'总收入',val:records===null?'…':'¥'+fmt(income),cls:'green'},
+    {icon:'📉',label:'总支出',val:records===null?'…':'¥'+fmt(expense),cls:'red'},
+    {icon:'💎',label:'净收益',val:records===null?'…':(net>=0?'+':'')+fmt(net),cls:net>=0?'blue':'red'},
+    {icon:'📑',label:'记录条数',val:records===null?'…':display.length+'条',cls:'amber'},
+  ];
+
+  return(
+    <div className="fin-page">
+      <div className="fin-topbar">
+        <button className="fin-back" onClick={onBack}>← 返回</button>
+        <div className="fin-hdr-title">💰 财务看板</div>
+        <button onClick={load} style={{background:'none',border:'none',fontSize:'.8rem',cursor:'pointer',color:'#6B7280'}}>↻</button>
+      </div>
+      {/* 项目筛选 */}
+      <div style={{display:'flex',gap:8,padding:'10px 16px 0',flexWrap:'wrap'}}>
+        {['all',...PROJECTS,'其他'].map(p=>(
+          <button key={p} onClick={()=>setFilterProj(p)} style={{padding:'4px 12px',borderRadius:99,border:'1.5px solid',fontSize:'.7rem',fontWeight:700,cursor:'pointer',borderColor:filterProj===p?'#22C55E':'#E5E7EB',background:filterProj===p?'#22C55E':'#fff',color:filterProj===p?'#fff':'#374151'}}>
+            {p==='all'?'全部项目':p}
+          </button>
+        ))}
+      </div>
+      <div className="fin-kpis" style={{marginTop:12}}>
+        {kpis.map((k,i)=>(
+          <div key={i} className={`fin-kpi ${k.cls}`}>
+            <div className="fin-kpi-icon">{k.icon}</div>
+            <div className="fin-kpi-val">{k.val}</div>
+            <div className="fin-kpi-label">{k.label}</div>
+          </div>
+        ))}
+      </div>
+      <div className="fin-card">
+        <div className="fin-card-title">🧾 流水明细</div>
+        {records===null&&<div style={{textAlign:'center',padding:'20px 0',color:'#9CA3AF',fontSize:'.8rem'}}>⏳ 加载中...</div>}
+        {records!==null&&display.length===0&&(
+          <div style={{textAlign:'center',padding:'32px 0'}}>
+            <div style={{fontSize:'2.5rem',marginBottom:10}}>💰</div>
+            <div style={{color:'#6B7280',fontSize:'.85rem',fontWeight:600}}>暂无财务记录</div>
+            <div style={{color:'#9CA3AF',fontSize:'.72rem',marginTop:6,lineHeight:1.6}}>
+              成员向奇点汇报收支后，数据将自动录入<br/>
+              例：「理享招生1人，收入5000，差旅报1000」
+            </div>
+          </div>
+        )}
+        {display.map((r,i)=>{
+          const isInc=r.type==='income';
+          const dt=r.created_at?new Date(r.created_at).toLocaleDateString('zh-CN'):'';
+          return(
+            <div key={r.id||i} className="fin-tx">
+              <div className="fin-tx-icon" style={{background:isInc?'#F0FDF4':'#FFF7F7'}}>{isInc?'💰':'💸'}</div>
+              <div className="fin-tx-info">
+                <div className="fin-tx-name">{r.category||r.note||'—'}{r.project&&<span style={{marginLeft:6,fontSize:'.6rem',color:'#9CA3AF'}}>#{r.project}</span>}</div>
+                <div className="fin-tx-date">{dt}{r.reporter?' · '+r.reporter:''}{r.note&&r.category?' · '+r.note:''}</div>
+              </div>
+              <div className={`fin-tx-amount ${isInc?'inc':'exp'}`}>{isInc?'+':'-'}¥{(Number(r.amount)||0).toLocaleString()}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ===== Pinball Game Page ===== */
+function ThinkingPage({onBack}){
+  const [score,setScore]=useState(0);
+  const [best,setBest]=useState(0);
+  const [started,setStarted]=useState(false);
+  const [missKey,setMissKey]=useState(0);
+
+  const areaRef=useRef(null);
+  const ballRef=useRef(null);
+  const paddleRef=useRef(null);
+  const animRef=useRef(null);
+  const gRef=useRef({ballX:0,ballY:0,dx:3,dy:4,paddleX:0,score:0});
+
+  const BALL_R=22;
+  const PADDLE_W=96;
+  const PADDLE_H=13;
+  const PADDLE_BOTTOM=78;
+
+  const resetBall=(W,H)=>{
+    const g=gRef.current;
+    g.ballX=W/2+(Math.random()-.5)*W*.3;
+    g.ballY=H*.22;
+    const speed=3.5;
+    const ang=(Math.random()-.5)*1.2;
+    g.dx=Math.sin(ang)*speed*(Math.random()>.5?1:-1);
+    g.dy=Math.cos(ang)*speed;
+  };
+
+  useEffect(()=>{
+    if(!started) return;
+    const area=areaRef.current;
+    if(!area) return;
+    // wait one frame for layout
+    const rid=requestAnimationFrame(()=>{
+      const ball=ballRef.current;
+      const paddle=paddleRef.current;
+      if(!ball||!paddle) return;
+      const W=area.clientWidth||350;
+      const H=area.clientHeight||480;
+      const g=gRef.current;
+      resetBall(W,H);
+      g.paddleX=(W-PADDLE_W)/2;
+      g.score=0;
+      paddle.style.width=PADDLE_W+'px';
+
+      const tick=()=>{
+        const W2=area.clientWidth||350;
+        const H2=area.clientHeight||480;
+        const paddleTop=H2-PADDLE_BOTTOM-PADDLE_H;
+        g.ballX+=g.dx;
+        g.ballY+=g.dy;
+        // Wall bounces
+        if(g.ballX-BALL_R<2){g.dx=Math.abs(g.dx);g.ballX=BALL_R+2;}
+        if(g.ballX+BALL_R>W2-2){g.dx=-Math.abs(g.dx);g.ballX=W2-BALL_R-2;}
+        if(g.ballY-BALL_R<4){g.dy=Math.abs(g.dy);g.ballY=BALL_R+4;}
+        // Paddle hit
+        if(g.dy>0&&
+           g.ballY+BALL_R>=paddleTop&&
+           g.ballY+BALL_R<=paddleTop+PADDLE_H+Math.abs(g.dy)*2&&
+           g.ballX>=g.paddleX-4&&g.ballX<=g.paddleX+PADDLE_W+4){
+          const hitRatio=(g.ballX-g.paddleX)/PADDLE_W; // 0..1
+          const bounceAngle=(hitRatio-.5)*2.2; // -1.1..1.1 rad
+          const spd=Math.min(Math.sqrt(g.dx*g.dx+g.dy*g.dy)*1.055,15);
+          g.dx=Math.sin(bounceAngle)*spd;
+          g.dy=-Math.max(2,Math.cos(bounceAngle)*spd);
+          g.ballY=paddleTop-BALL_R;
+          g.score++;
+          setScore(g.score);
+          setBest(p=>Math.max(p,g.score));
+        }
+        // Miss
+        if(g.ballY>H2+BALL_R*3){
+          g.score=0;
+          setScore(0);
+          setMissKey(k=>k+1);
+          resetBall(W2,H2);
+        }
+        // Render via direct DOM
+        ball.style.left=g.ballX+'px';
+        ball.style.top=g.ballY+'px';
+        paddle.style.left=g.paddleX+'px';
+        animRef.current=requestAnimationFrame(tick);
+      };
+      animRef.current=requestAnimationFrame(tick);
+    });
+    return()=>{cancelAnimationFrame(rid);cancelAnimationFrame(animRef.current);};
+  },[started]);
+
+  const handleSlider=e=>{
+    const area=areaRef.current;
+    if(!area) return;
+    const W=area.clientWidth||350;
+    gRef.current.paddleX=(parseInt(e.target.value)/100)*(W-PADDLE_W);
+  };
+
+  return(
+    <div className="pinball-page">
+      <div className="pinball-topbar">
+        <button className="pinball-back" onClick={onBack}>← 返回</button>
+        <div className="pinball-score-box">
+          {started
+            ?<><div className="pinball-score">🏆 {score}</div>{best>0&&<div className="pinball-best">最高 {best} 分</div>}</>
+            :<div style={{color:'#64748B',fontWeight:700,fontSize:'.95rem'}}>🎮 弹珠小游戏</div>
+          }
+        </div>
+        <div style={{width:60}}/>
+      </div>
+
+      <div className="pinball-area" ref={areaRef}>
+        {started?(
+          <>
+            <div className="pinball-wall-top"/>
+            <div className="pinball-wall-l"/><div className="pinball-wall-r"/>
+            <div className="pinball-ball" ref={ballRef}>🤔</div>
+            <div className="pinball-paddle" ref={paddleRef}
+              style={{bottom:PADDLE_BOTTOM+'px',position:'absolute'}}/>
+            {missKey>0&&<div key={missKey} className="pinball-miss-fx">💥 接不住！</div>}
+          </>
+        ):(
+          <div className="pinball-start-wrap">
+            <div className="pinball-start-fig">🤔</div>
+            <div className="pinball-start-hint">
+              接住弹来弹去的思考小人<br/>
+              每接一次 +1分 · 接不住清零<br/>
+              <span style={{fontSize:'.75rem',color:'#334155'}}>越打越快，挑战高分！</span>
+            </div>
+            <button className="pinball-start-btn" onClick={()=>setStarted(true)}>
+              🎮 开始游戏
+            </button>
+          </div>
+        )}
+      </div>
+
+      {started&&(
+        <div className="pinball-slider-wrap">
+          <div className="pinball-slider-hint">← 拖动滑块移动挡板 →</div>
+          <input type="range" className="pinball-slider"
+            min="0" max="100" defaultValue="50"
+            onInput={handleSlider} onChange={handleSlider}/>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LeaderboardPage({onBack}){
+  const [pts,setPts]=useState({});
+  const [bossTasks,setBT]=useState([]);
+
+  useEffect(()=>{
+    const calc=(bts)=>{
+      const map={};
+      bts.forEach(bt=>{
+        const desc=bt.description||'';
+        const tM=desc.match(/\[target:(\d+)\]/);
+        const pM=desc.match(/\[progress:(\d+)\]/);
+        if(!tM||!bt.assignee)return;
+        const target=parseInt(tM[1]);
+        const progress=pM?parseInt(pM[1]):0;
+        const pt=Math.floor(progress/target*10);
+        const name=bt.assignee;
+        if(map[name]==null||pt>map[name])map[name]=pt;
+      });
+      const wp=window.__ptMap||{};
+      Object.keys(wp).forEach(n=>{if(wp[n]!=null&&(map[n]==null||wp[n]>map[n]))map[n]=wp[n];});
+      return map;
+    };
+    const load=()=>SB.from('boss_tasks').select('*').then(({data})=>{
+      const bts=data||[];setBT(bts);setPts(calc(bts));
+    });
+    load();
+    const t=setInterval(load,15000);
+    return()=>clearInterval(t);
+  },[]);
+
+  // tier config
+  const tier=(pt)=>pt>=8?{label:'S',bg:'#92400E',color:'#FDE68A',glow:'#F59E0B'}:
+                   pt>=5?{label:'A',bg:'#4C1D95',color:'#DDD6FE',glow:'#7C3AED'}:
+                   pt>=3?{label:'B',bg:'#1E3A5F',color:'#93C5FD',glow:'#3B82F6'}:
+                         {label:'C',bg:'#064E3B',color:'#6EE7B7',glow:'#10B981'};
+
+  const rankIcon=(i)=>i===0?'👑':i===1?'🥈':i===2?'🥉':`#${i+1}`;
+
+  const members=ALL_MEMBERS.map(name=>{
+    const pt=pts[name]??0;
+    const orgData=ORG.find(o=>o.name===name)||{title:'',cls:'',lv:6,dept:''};
+    const bt=bossTasks.filter(t=>t.assignee===name&&/\[target:\d+\]/.test(t.description||'')).sort((a,b)=>b.id-a.id)[0];
+    const tM=bt?(bt.description||'').match(/\[target:(\d+)\]/):null;
+    const pM=bt?(bt.description||'').match(/\[progress:(\d+)\]/):null;
+    const target=tM?parseInt(tM[1]):0;
+    const progress=pM?parseInt(pM[1]):0;
+    const pct=target>0?Math.round(progress/target*100):0;
+    return{name,pt,target,progress,pct,orgData};
+  }).sort((a,b)=>b.pt-a.pt||(b.pct-a.pct));
+
+  return(
+    <div className="lb-wrap">
+      <div className="lb-header">
+        <button className="lb-back" onClick={onBack}>← 返回</button>
+        <div className="lb-title">⚔️ 龙 虎 榜</div>
+        <div style={{width:52}}/>
+      </div>
+      <div className="lb-sub">赛季 PT 积分榜 · 实时更新</div>
+
+      {/* 冠军大卡 */}
+      {members.length>0&&(()=>{
+        const m=members[0];
+        const t=tier(m.pt);
+        const lc=LVC[m.orgData.lv]||'#7C3AED';
+        const stars='★'.repeat(Math.min(m.orgData.lv-5,4))+'☆'.repeat(Math.max(0,4-(m.orgData.lv-5)));
+        return(
+          <div style={{margin:'0 12px 14px',borderRadius:16,padding:'18px 16px 14px',
+            background:`linear-gradient(135deg,${lc}22,${t.glow}18)`,
+            border:`1.5px solid ${lc}55`,
+            boxShadow:`0 0 32px ${t.glow}28`,position:'relative',overflow:'hidden'}}>
+            <div style={{position:'absolute',top:-20,right:-20,width:120,height:120,
+              borderRadius:'50%',background:`radial-gradient(circle,${t.glow}20 0%,transparent 70%)`}}/>
+            <div style={{display:'flex',alignItems:'center',gap:12}}>
+              <div style={{position:'relative',flexShrink:0}}>
+                <div style={{width:54,height:54,borderRadius:'50%',background:nameClr(m.name),
+                  display:'flex',alignItems:'center',justifyContent:'center',
+                  color:'#fff',fontSize:'1.4rem',fontWeight:900,
+                  boxShadow:`0 0 18px ${nameClr(m.name)}80`}}>{m.name[0]}</div>
+                <div style={{position:'absolute',top:-10,left:'50%',transform:'translateX(-50%)',fontSize:'1rem'}}>👑</div>
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                  <span style={{color:'#fff',fontWeight:900,fontSize:'1.05rem'}}>{m.name}</span>
+                  {m.orgData.cls&&<span className="og-cls" style={{fontSize:'.52rem'}}>{m.orgData.cls}</span>}
+                  <span className="lb-tier" style={{background:t.bg,color:t.color}}>{t.label}</span>
+                </div>
+                <div style={{color:lc,fontSize:'.68rem',marginTop:2}}>{m.orgData.title}</div>
+                <div style={{color:'#64748B',fontSize:'.6rem'}}>{m.orgData.dept}</div>
+                <div style={{fontSize:'.65rem',color:'#F59E0B',letterSpacing:1,marginTop:2}}>{stars}</div>
+              </div>
+              <div style={{textAlign:'center',flexShrink:0}}>
+                <div style={{fontSize:'2.2rem',fontWeight:900,color:'#F59E0B',lineHeight:1,
+                  textShadow:`0 0 20px #F59E0B80`}}>{m.pt}</div>
+                <div style={{color:'#92400E',fontSize:'.58rem',fontWeight:700,letterSpacing:1}}>PT</div>
+              </div>
+            </div>
+            {m.target>0&&(
+              <div style={{marginTop:10}}>
+                <div style={{display:'flex',justifyContent:'space-between',fontSize:'.58rem',color:'#94A3B8',marginBottom:3}}>
+                  <span>🎯 招生任务</span>
+                  <span>{m.progress}/{m.target} 人 · {m.pct}%</span>
+                </div>
+                <div className="lb-xp">
+                  <div className="lb-xpfill" style={{width:m.pct+'%',
+                    background:`linear-gradient(90deg,${t.glow},${lc})`}}/>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* 2名之后 */}
+      {members.slice(1).map((m,i)=>{
+        const rank=i+2;
+        const t=tier(m.pt);
+        const lc=LVC[m.orgData.lv]||'#6B7280';
+        const stars='★'.repeat(Math.min(m.orgData.lv-5,4))+'☆'.repeat(Math.max(0,4-(m.orgData.lv-5)));
+        return(
+          <div key={m.name} className="lb-card"
+            style={{background:'rgba(255,255,255,.04)',
+              border:`1px solid ${lc}30`,
+              boxShadow:`0 2px 12px ${lc}10`}}>
+            <div style={{display:'flex',alignItems:'center',gap:10}}>
+              <div className="lb-rank">{rankIcon(rank-1)}</div>
+              <div style={{position:'relative',flexShrink:0}}>
+                <div className="og-mavatar" style={{background:nameClr(m.name),
+                  boxShadow:`0 0 8px ${nameClr(m.name)}50`}}>{m.name[0]}</div>
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:'flex',alignItems:'center',gap:5,flexWrap:'wrap'}}>
+                  <span style={{color:'#F1F5F9',fontWeight:700,fontSize:'.88rem'}}>{m.name}</span>
+                  {m.orgData.cls&&<span className="og-cls" style={{fontSize:'.48rem'}}>{m.orgData.cls}</span>}
+                  <span className="lb-tier" style={{background:t.bg,color:t.color}}>{t.label}</span>
+                </div>
+                <div style={{color:lc,fontSize:'.62rem',marginTop:1}}>{m.orgData.title||'—'}</div>
+                <div style={{fontSize:'.58rem',color:'#F59E0B',letterSpacing:1}}>{stars}</div>
+                {m.target>0&&(
+                  <div style={{marginTop:5}}>
+                    <div style={{display:'flex',justifyContent:'space-between',fontSize:'.55rem',color:'#64748B',marginBottom:2}}>
+                      <span>招生进度</span><span>{m.progress}/{m.target} · {m.pct}%</span>
+                    </div>
+                    <div className="lb-xp">
+                      <div className="lb-xpfill" style={{width:m.pct+'%',background:`linear-gradient(90deg,${lc},${t.glow})`}}/>
+                    </div>
+                  </div>
+                )}
+                {m.target===0&&<div style={{fontSize:'.55rem',color:'#374151',marginTop:2}}>暂无任务目标</div>}
+              </div>
+              <div style={{textAlign:'center',flexShrink:0}}>
+                <div style={{fontSize:'1.4rem',fontWeight:900,color:t.glow,lineHeight:1}}>{m.pt}</div>
+                <div style={{color:'#374151',fontSize:'.55rem',letterSpacing:1}}>PT</div>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function App(){
+  const [tasks,setTasks]=useState([]);
+  const [bossTasks,setBossTasks]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [showForm,setShowForm]=useState(false);
+  const [editTask,setEditTask]=useState(null);
+  const [toast,setToast]=useState(null);
+  const [page,setPage]=useState('home');
+  const [drawer,setDrawer]=useState(null);
+
+  // boss_tasks 拉取 + 新回复通知 + 30s 轮询
+  const prevBTDescRef=useRef({});   // {taskId: descLength}
+  const lastFinIdRef=useRef(0);     // 上次已见 finance_record id
+
+  useEffect(()=>{
+    const fetchBT=()=>SB.from('boss_tasks').select('*').order('id',{ascending:false}).limit(100).then(({data})=>{
+      if(!data) return;
+      const isFirst=Object.keys(prevBTDescRef.current).length===0;
+      if(!isFirst){
+        data.forEach(t=>{
+          const prev=prevBTDescRef.current[t.id]||0;
+          const cur=(t.description||'').length;
+          if(cur>prev){
+            // 从新增内容里提取回复者
+            const newChunk=(t.description||'').slice(prev);
+            const m=newChunk.match(/\]\s*(.+?)回复：/);
+            const who=m?m[1]:'成员';
+            setToast(`📩 ${who} 有新消息 → ${t.title||t.assignee||''}`);
+            // 通知 Avatar 同步
+            window.dispatchEvent(new CustomEvent('qidian_new_reply',{detail:{who,task:t.title||t.assignee||''}}));
+          }
+        });
+      }
+      data.forEach(t=>{ prevBTDescRef.current[t.id]=(t.description||'').length; });
+      setBossTasks(data);
+    });
+
+    // finance_records 新条目通知
+    const fetchFin=()=>{
+      const since=lastFinIdRef.current;
+      if(!since) return;
+      SB.from('finance_records').select('*').gt('id',since).order('id',{ascending:true}).limit(10).then(({data})=>{
+        if(!data||data.length===0) return;
+        data.forEach(r=>{
+          const sign=r.type==='income'?'+':'-';
+          const amt=r.amount>0?` ${sign}¥${r.amount}`:'';
+          setToast(`💰 ${r.reporter||''}：${r.category}${amt}`);
+        });
+        lastFinIdRef.current=data[data.length-1].id;
+      });
+    };
+
+    // 初始化：记录当前最新 finance id 作为基准，不弹旧数据
+    SB.from('finance_records').select('id').order('id',{ascending:false}).limit(1).then(({data})=>{
+      if(data&&data.length>0) lastFinIdRef.current=data[0].id;
+    });
+
+    fetchBT();
+    const timer=setInterval(()=>{fetchBT();fetchFin();},15000); // 缩短到15s更及时
+    const onAck=()=>fetchBT();
+    window.addEventListener('boss_task_acked',onAck);
+    return()=>{clearInterval(timer);window.removeEventListener('boss_task_acked',onAck);};
+  },[]);
+
+  useEffect(()=>{
+    SB.from('tasks').select('*').order('id').then(async({data,error})=>{
+      if(!error){
+        if(!data||data.length===0){
+          const {data:ins}=await SB.from('tasks').insert(DEMO.map(taskToDb)).select();
+          setTasks((ins||[]).map(dbToTask));
+        } else {
+          setTasks(data.map(dbToTask));
+        }
+      }
+      setLoading(false);
+    });
+  },[]);
+
+  // 计算每人 PT 值（完成比例/10，取整），存全局供所有页面读取
+  useEffect(()=>{
+    const map={};
+    tasks.forEach(t=>{
+      if(!t.assignee) return;
+      if(!map[t.assignee]) map[t.assignee]={total:0,done:0};
+      map[t.assignee].total++;
+      if(t.status==='completed') map[t.assignee].done++;
+    });
+    const ptMap={};
+    Object.entries(map).forEach(([name,{total,done}])=>{
+      ptMap[name]=total>0?Math.floor(done/total*10):0;
+    });
+    // 叠加 boss_tasks 中带 [target:N][progress:M] 的目标任务
+    bossTasks.forEach(bt=>{
+      const desc=bt.description||'';
+      const tM=desc.match(/\[target:(\d+)\]/);
+      const pM=desc.match(/\[progress:(\d+)\]/);
+      if(!tM||!bt.assignee) return;
+      const target=parseInt(tM[1]);
+      const progress=pM?parseInt(pM[1]):0;
+      if(target<=0) return;
+      const btPt=Math.floor(progress/target*10);
+      const name=bt.assignee;
+      if(ptMap[name]==null||btPt>ptMap[name]) ptMap[name]=btPt;
+    });
+    window.__ptMap=ptMap;
+  },[tasks,bossTasks]);
+
+  // 监听语音任务写入事件，立刻同步到看板
+  useEffect(()=>{
+    const handler=e=>{
+      const r=e.detail;
+      setTasks(p=>{
+        if(p.find(t=>t.id===r.id)) return p; // 去重
+        return [...p,dbToTask(r)];
+      });
+      setToast(`📋 任务已添加：${r.name||r.title||''}`);
+    };
+    window.addEventListener('walle_task_created',handler);
+    return()=>window.removeEventListener('walle_task_created',handler);
+  },[]);
+
+  const notify=msg=>setToast(msg);
+  const save=async t=>{
+    if(editTask){
+      const {data}=await SB.from('tasks').update(taskToDb(t)).eq('id',t.id).select();
+      if(data) setTasks(p=>p.map(x=>x.id===t.id?dbToTask(data[0]):x));
+      notify('任务已更新');
+    } else {
+      const {data}=await SB.from('tasks').insert([taskToDb(t)]).select();
+      if(data) setTasks(p=>[...p,dbToTask(data[0])]);
+      notify('任务已创建');
+    }
+    setShowForm(false);setEditTask(null);
+  };
+  const del=async id=>{await SB.from('tasks').delete().eq('id',id);setTasks(p=>p.filter(t=>t.id!==id));notify('已删除');};
+  const cycle=async id=>{const task=tasks.find(t=>t.id===id);if(!task)return;const i=(SCYCLE.indexOf(task.status)+1)%SCYCLE.length;const ns=SCYCLE[i];await SB.from('tasks').update({status:ns}).eq('id',id);setTasks(p=>p.map(t=>t.id===id?{...t,status:ns}:t));};
+  if(loading)return(<div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:12,background:'linear-gradient(150deg,#F0FDF4,#F8FAFC,#ECFDF5)'}}><div style={{width:36,height:36,border:'3px solid #22C55E',borderTopColor:'transparent',borderRadius:'50%',animation:'spin 1s linear infinite'}}/><div style={{color:'#6B7280',fontSize:'.88rem'}}>连接数据库中...</div></div>);
+
+  const today=new Date();today.setHours(0,0,0,0);
+  const total=tasks.length;
+  const done=tasks.filter(t=>t.status==='completed').length;
+  const doing=tasks.filter(t=>t.status==='in-progress').length;
+  const blocked=tasks.filter(t=>t.status==='blocked').length;
+  const overdue=tasks.filter(t=>t.status!=='completed'&&t.deadline&&new Date(t.deadline)<today).length;
+  const rate=total?Math.round(done/total*100):0;
+
+  if(page==='leaderboard') return <><LeaderboardPage onBack={()=>setPage('home')}/>{toast&&<Toast msg={toast} onClose={()=>setToast(null)}/>}</>;
+  if(page==='home') return <><HomePage tasks={tasks} onNav={setPage}/><VoiceFloat tasks={tasks}/>{toast&&<Toast msg={toast} onClose={()=>setToast(null)}/>}</>;
+  if(page==='finance') return <><FinancePage onBack={()=>setPage('home')}/><Avatar tasks={tasks}/><VoiceFloat tasks={tasks}/>{toast&&<Toast msg={toast} onClose={()=>setToast(null)}/>}</>;
+  if(page==='unknown') return <><ThinkingPage onBack={()=>setPage('home')}/>{toast&&<Toast msg={toast} onClose={()=>setToast(null)}/>}</>;
+
+  return(
+    <div className="app">
+      <div className="nav-tabs" style={{marginBottom:16}}>
+        <div className="nav-tab" style={{flex:'0 0 auto',padding:'8px 12px',fontSize:'.78rem',color:'#9CA3AF'}} onClick={()=>setPage('home')}>← 首页</div>
+        <div className={`nav-tab${page==='tasks'?' active':''}`} onClick={()=>setPage('tasks')}>📋 任务看板</div>
+        <div className={`nav-tab org${page==='org'?' active':''}`} onClick={()=>setPage('org')}>⚔ 战队图谱</div>
+      </div>
+
+      {page==='tasks'&&(<>
+      <div className="stats-grid">
+        <div className={`stat-card s-total${drawer==='all'?' active-filter':''}`} onClick={()=>setDrawer(d=>d==='all'?null:'all')}><div className="stat-num">{total}</div><div className="stat-label">全部任务</div></div>
+        <div className={`stat-card s-done${drawer==='completed'?' active-filter':''}`} onClick={()=>setDrawer(d=>d==='completed'?null:'completed')}><div className="stat-num">{done}</div><div className="stat-label">已完成</div></div>
+        <div className={`stat-card s-doing${drawer==='in-progress'?' active-filter':''}`} onClick={()=>setDrawer(d=>d==='in-progress'?null:'in-progress')}><div className="stat-num">{doing}</div><div className="stat-label">进行中</div></div>
+        <div className={`stat-card s-blocked${drawer==='blocked'?' active-filter':''}`} onClick={()=>setDrawer(d=>d==='blocked'?null:'blocked')}><div className="stat-num">{blocked}</div><div className="stat-label">已卡点</div></div>
+        <div className={`stat-card s-overdue${drawer==='overdue'?' active-filter':''}`} onClick={()=>setDrawer(d=>d==='overdue'?null:'overdue')}><div className="stat-num">{overdue}</div><div className="stat-label">逾期中</div></div>
+      </div>
+
+      <div className="card">
+        <div className="prog-row"><span style={{fontWeight:700,fontSize:'.9rem'}}>整体完成率</span><span className="prog-rate">{rate}%</span></div>
+        <div className="prog-bar"><div className="prog-fill" style={{width:`${rate}%`}}/></div>
+      </div>
+
+      <div className="card">
+        <div className="row-between">
+          <div className="sec-title">任务列表</div>
+          <button className="add-btn" onClick={()=>{setEditTask(null);setShowForm(true);}}>＋ 新建任务</button>
+        </div>
+        {tasks.length===0?(
+          <div className="empty"><div style={{fontSize:'2.5rem',marginBottom:10}}>📋</div><div style={{fontWeight:600,marginBottom:4}}>暂无任务</div><div style={{fontSize:'.83rem'}}>点击「新建任务」开始添加</div></div>
+        ):(
+          <>
+            <div style={{overflowX:'auto'}}>
+              <table className="task-table">
+                <thead><tr><th>任务</th><th>负责人</th><th>截止日期</th><th>优先级</th><th>状态</th><th>交付文件</th><th></th></tr></thead>
+                <tbody>
+                  {tasks.map(t=>{
+                    const ov=t.status!=='completed'&&t.deadline&&new Date(t.deadline)<today;
+                    return(
+                      <tr key={t.id}>
+                        <td style={{maxWidth:260}}>
+                          <div className="task-name">{t.name}</div>
+                          {t.status==='blocked'&&t.blocker&&<div className="task-block">▲ {t.blocker}</div>}
+                          {t.notes&&<div className="task-sub">{t.notes.length>48?t.notes.slice(0,48)+'…':t.notes}</div>}
+                        </td>
+                        <td><span className="chip">{t.assignee||'—'}</span></td>
+                        <td style={{whiteSpace:'nowrap',fontSize:'.82rem'}}>
+                          {t.deadline?new Date(t.deadline).toLocaleDateString('zh-CN'):'—'}
+                          {ov&&<span className="ov">逾期</span>}
+                        </td>
+                        <td><span className={P[t.priority]?.cls}>{P[t.priority]?.e} {P[t.priority]?.label}</span></td>
+                        <td><span className={`badge ${S[t.status]?.cls}`} onClick={()=>cycle(t.id)} title="点击切换状态">{S[t.status]?.emoji} {S[t.status]?.label}</span></td>
+                        <td style={{minWidth:80}}>
+                          {t.files?.length>0?t.files.map((f,i)=><span key={i} className="file-tag">📄 {f.length>12?f.slice(0,12)+'…':f}</span>):<span style={{color:'#D1D5DB',fontSize:'.75rem'}}>—</span>}
+                        </td>
+                        <td style={{whiteSpace:'nowrap'}}>
+                          <button className="btn btn-ghost btn-sm" style={{marginRight:5}} onClick={()=>{setEditTask(t);setShowForm(true);}}>编辑</button>
+                          <button className="btn btn-del btn-sm" onClick={()=>del(t.id)}>删除</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="mobile-cards">
+              {tasks.map(t=>{
+                const ov=t.status!=='completed'&&t.deadline&&new Date(t.deadline)<today;
+                return(
+                  <div key={t.id} className="m-card">
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'start',marginBottom:7}}>
+                      <div style={{fontWeight:700,flex:1,marginRight:8,fontSize:'.9rem'}}>{t.name}</div>
+                      <span className={`badge ${S[t.status]?.cls}`} onClick={()=>cycle(t.id)}>{S[t.status]?.emoji} {S[t.status]?.label}</span>
+                    </div>
+                    <div style={{fontSize:'.78rem',color:'#6B7280',display:'flex',flexWrap:'wrap',gap:'6px 12px'}}>
+                      <span>👤 {t.assignee||'—'}</span>
+                      {t.deadline&&<span>📅 {new Date(t.deadline).toLocaleDateString('zh-CN')}{ov&&<span className="ov">逾期</span>}</span>}
+                      <span className={P[t.priority]?.cls}>{P[t.priority]?.e} {P[t.priority]?.label}</span>
+                    </div>
+                    {t.status==='blocked'&&t.blocker&&<div className="task-block" style={{marginTop:5}}>▲ {t.blocker}</div>}
+                    {t.files?.length>0&&<div style={{marginTop:5}}>{t.files.map((f,i)=><span key={i} className="file-tag">📄 {f.length>18?f.slice(0,18)+'…':f}</span>)}</div>}
+                    <div style={{display:'flex',gap:7,marginTop:9}}>
+                      <button className="btn btn-ghost btn-sm" onClick={()=>{setEditTask(t);setShowForm(true);}}>编辑</button>
+                      <button className="btn btn-del btn-sm" onClick={()=>del(t.id)}>删除</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="sec-title">数据看板</div>
+        <div className="chart-grid">
+          <div>
+            <div style={{fontSize:'.82rem',color:'#6B7280',fontWeight:600,marginBottom:11}}>状态分布</div>
+            <Donut tasks={tasks}/>
+          </div>
+          <div>
+            <div style={{fontSize:'.82rem',color:'#6B7280',fontWeight:600,marginBottom:11}}>优先级分布</div>
+            {['high','mid','low'].map(p=>{
+              const cnt=tasks.filter(t=>t.priority===p).length;
+              const pct=total?cnt/total*100:0;
+              return(
+                <div key={p} className="pri-bar-wrap">
+                  <div className="pri-bar-label"><span className={P[p].cls}>{P[p].e} {P[p].label}优先级</span><span style={{fontWeight:700}}>{cnt}</span></div>
+                  <div className="pri-bar-bg"><div className="pri-bar-fill" style={{width:`${pct}%`,background:p==='high'?'#DC2626':p==='mid'?'#D97706':'#16A34A'}}/></div>
+                </div>
+              );
+            })}
+            <div className="summary-box">
+              <div style={{fontSize:'.78rem',color:'#6B7280',fontWeight:700}}>今日概况</div>
+              <div className="summary-grid">
+                <div className="summary-cell"><div className="summary-num" style={{color:'#16A34A'}}>{rate}%</div><div className="summary-lbl">完成率</div></div>
+                <div className="summary-cell"><div className="summary-num" style={{color:overdue>0?'#DC2626':'#16A34A'}}>{overdue}</div><div className="summary-lbl">逾期任务</div></div>
+                <div className="summary-cell"><div className="summary-num" style={{color:'#9F1239'}}>{blocked}</div><div className="summary-lbl">卡点任务</div></div>
+                <div className="summary-cell"><div className="summary-num" style={{color:'#1D4ED8'}}>{doing}</div><div className="summary-lbl">进行中</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      </>)}
+
+      {page==='org'&&<OrgPage/>}
+
+      {showForm&&<TaskForm task={editTask} onSave={save} onClose={()=>{setShowForm(false);setEditTask(null);}}/>}
+      {toast&&<Toast msg={toast} onClose={()=>setToast(null)}/>}
+      <VoiceFloat tasks={tasks}/>
+      <Avatar tasks={tasks}/>
+      {drawer&&<TaskDrawer tasks={tasks} bossTasks={bossTasks} filter={drawer} onClose={()=>setDrawer(null)} onEdit={t=>{setEditTask(t);setShowForm(true);}} onDelete={del}/>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
