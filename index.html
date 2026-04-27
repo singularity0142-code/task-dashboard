@@ -637,7 +637,7 @@ body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;backgr
 <div id="root"></div>
 <script type="text/babel">
 const {useState,useEffect,useRef}=React;
-const BRIDGE_URL=(localStorage.getItem('QIDIAN_BRIDGE_URL')||window.QIDIAN_BRIDGE_URL||'http://127.0.0.1:8788').replace(/\/$/,'');
+const BRIDGE_URL=(localStorage.getItem('QIDIAN_BRIDGE_URL')||window.QIDIAN_BRIDGE_URL||'http://35.79.2.111/qidian').replace(/\/$/,'');
 function getPT(name){const m=(window.__ptMap||{})[name];return m!=null?m:0;}
 
 /* ===== Supabase ===== */
@@ -1347,11 +1347,6 @@ function VoiceFloat({tasks}){
     return d.answer.trim();
   };
 
-  // ── 组件级常量（供 speak / confirmProject 复用）──
-  const VC_QBOT=['8770441016',':AAGP-D6f4ht','aiKDB4I2xX9','A3fffu09LueuA'].join('');
-  const VC_BOSS='8666564306';
-  const qSend=(chatId,text)=>fetch(`https://api.telegram.org/bot${VC_QBOT}/sendMessage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chatId,text,parse_mode:'Markdown'})});
-
   const onErr=()=>{stopBars();setPhase('idle');setStatus('出错，请重试');setTimeout(()=>setStatus('点击说话 · 可下达任务'),3000);};
 
   const speak=(ans,noAutoResume=false)=>{
@@ -1457,22 +1452,9 @@ function VoiceFloat({tasks}){
     pendingTaskRef.current=null;
     setPendingTask(null);
     const assignee=task.assignee||'';
-    const memberChatId=VC_MEMBERS[assignee];
-    const pl={high:'🔴 高',mid:'🟡 中',low:'🟢 低'}[task.priority||'mid'];
-    const dlStr=task.deadline?new Date(task.deadline).toLocaleDateString('zh-CN'):'待定';
     const projLabel=proj==='其他'?'其他项目':proj;
 
-    // 1. 私信成员
-    let tgMsgId=null;
-    if(memberChatId){
-      const memberMsg='📋 *秦总任务指派*\n\n*'+(task.title||'（待定）')+'*\n📅 截止：'+dlStr+'\n优先级：'+pl+(task.description?'\n说明：'+task.description:'')+'\n项目：'+projLabel+'\n\n请直接回复此消息汇报进展，奇点会转达给秦总 🙏';
-      try{
-        const tgRes=await qSend(memberChatId,memberMsg);
-        const tgData=await tgRes.json();
-        if(tgData.ok&&tgData.result) tgMsgId=tgData.result.message_id;
-      }catch(e){console.warn('[TG发送失败]',e);}
-    }
-    // 2. 写入指令台 + 任务看板
+    // 1. 写入指令台 + 任务看板
     const tid=Date.now();
     // 如果是招生类任务且标题含数字，自动加 [target:N][progress:0]
     const _recruitKW=['招生','招人','学生','辅导师','招聘','招募'];
@@ -1480,7 +1462,7 @@ function VoiceFloat({tasks}){
     const _numM=(task.title||'').match(/(\d+)/);
     const _targetN=_isRecruitTask&&_numM?parseInt(_numM[1]):0;
     const _targetPrefix=_targetN>0?('[target:'+_targetN+']\n[progress:0]\n'):'';
-    const btDesc=_targetPrefix+(tgMsgId?('[tg:'+tgMsgId+']\n'):'')+(task.description||'');
+    const btDesc=_targetPrefix+(task.description||'');
     const bt={id:tid,title:task.title||'',assignee,deadline:task.deadline||null,priority:task.priority||'mid',description:btDesc,status:'in-progress',tg_sent:true,qidian_notified:true,created_at:new Date().toISOString()};
     const insertRes=await SB.from('boss_tasks').insert([bt]);
     if(insertRes.error) console.error('[boss_tasks insert 失败]',insertRes.error);
@@ -1495,29 +1477,41 @@ function VoiceFloat({tasks}){
     const isRecruit=RECRUIT_KW.some(kw=>(task.title||'').includes(kw)||(task.description||'').includes(kw));
     if(isRecruit&&assignee==='韩笑'){
       const coworker='吴晓磊';
-      const coId=VC_MEMBERS[coworker];
       const coRow={id:Date.now()+1,name:task.title||'',assignee:coworker,deadline:task.deadline||null,priority:task.priority||'mid',status:'in-progress',blocker:'',files:[],notes:'协同韩笑：'+(task.description||''),project:proj==='其他'?null:proj,created_at:(task.deadline||new Date().toISOString().split('T')[0])};
       SB.from('tasks').insert([coRow]).select().then(function(res){
         var ins=res.data;
         if(ins&&ins[0]) window.dispatchEvent(new CustomEvent('walle_task_created',{detail:ins[0]}));
       });
-      if(coId){
-        const coMsg='📋 *秦总任务指派（协同）*\n\n*'+(task.title||'')+'*\n📅 截止：'+dlStr+'\n优先级：'+pl+'\n与 韩笑 协同完成\n项目：'+projLabel+'\n\n请直接回复此消息汇报进展，奇点会转达给秦总 🙏';
-        qSend(coId,coMsg);
-      }
     }
 
-    // 3. 通知老板
-    const coNote=(isRecruit&&assignee==='韩笑')?'（吴晓磊已同步跟进）':'';
-    const bossMsg=memberChatId
-      ?'📤 *奇点已通知 '+assignee+'*'+coNote+'\n\n任务：'+(task.title||'')+'\n项目：'+projLabel+'\n截止：'+dlStr+'\n\n等待对方回复进展...'
-      :'⚠️ *'+assignee+'* 尚未绑定 Telegram，任务已记录到指令台';
-    qSend(VC_BOSS,bossMsg);
+    // 3. 交给 QidianBot 经协作群通知高管 bot
+    let queued=false;
+    try{
+      const actionRes=await fetch(`${BRIDGE_URL}/api/frontend-actions`,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          type:'assign_task',
+          request_code:'QR-FE-'+tid,
+          task_id:tid,
+          title:task.title||'',
+          assignee,
+          deadline:task.deadline||null,
+          priority:task.priority||'mid',
+          project:projLabel,
+          description:task.description||''
+        })
+      });
+      const actionData=await actionRes.json();
+      queued=!!actionData.ok;
+      if(!actionData.ok) console.warn('[frontend-action失败]',actionData);
+    }catch(e){console.warn('[frontend-action异常]',e);}
+
     // 4. 语音确认（speak 会自动恢复监听）
     const coSpeak=(isRecruit&&assignee==='韩笑')?' 吴晓磊也会协同跟进。':'';
-    speak(memberChatId
-      ?'好的老板，任务已归入'+projLabel+'，奇点已通知'+assignee+'跟进。'+coSpeak
-      :'好的老板，任务已归入'+projLabel+'，已记录到指令台。');
+    speak(queued
+      ?'好的老板，任务已归入'+projLabel+'，奇点会通过协作群通知'+assignee+'跟进。'+coSpeak
+      :'好的老板，任务已归入'+projLabel+'，但通知队列写入失败，请稍后在指令台重试。');
   };
 
   const btnClass='vf-btn'+(phase==='rec'?' rec':'')+(phase==='proc'||phase==='talking'?' proc':'');

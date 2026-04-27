@@ -104,13 +104,11 @@ body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;
 <div id="root"></div>
 <script type="text/babel">
 const {useState,useEffect,useCallback}=React;
+const BRIDGE_URL=(localStorage.getItem('QIDIAN_BRIDGE_URL')||window.QIDIAN_BRIDGE_URL||'http://35.79.2.111/qidian').replace(/\/$/,'');
 
 const SURL='https://nkkbvhtmlooverkhyqsa.supabase.co';
 const SKEY=['eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9','.eyJpc3MiOiJzdXBhYmFzZ','SIsInJlZiI6Im5ra2J2aH','RtbG9vdmVya2h5cXNhIiwi','cm9sZSI6ImFub24iLCJpYX','QiOjE3NzU2OTM1NTksImV4','cCI6MjA5MTI2OTU1OX0.7o','RpImggZHpvusrS6kJKWN6c','v12hYG4NqxUFCIZDCIs'].join('');
 const SB=supabase.createClient(SURL,SKEY);
-
-const BOT=['8770441016',':AAGP-D6f4ht','aiKDB4I2xX9','A3fffu09LueuA'].join('');
-const CHAT='7885643514';
 
 const PC={high:'#EF4444',mid:'#F59E0B',low:'#10B981'};
 const SS={
@@ -161,15 +159,24 @@ function App(){
   };
 
   const urge=async t=>{
-    const dl=t.deadline?new Date(t.deadline).toLocaleDateString('zh-CN'):'待定';
-    const msg=`⚡ *奇点催进度*\n\n📋 任务：${t.title}\n👤 负责人：${t.assignee||'待定'}\n📅 截止：${dl}\n\n请汇报最新进展 👆`;
-    await fetch(`https://api.telegram.org/bot${BOT}/sendMessage`,{
+    const res=await fetch(`${BRIDGE_URL}/api/frontend-actions`,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({chat_id:CHAT,text:msg,parse_mode:'Markdown'})
+      body:JSON.stringify({
+        type:'urge_task',
+        task_id:t.id,
+        title:t.title||'',
+        assignee:t.assignee||'',
+        deadline:t.deadline||null,
+        priority:t.priority||'mid',
+        project:t.project||'',
+        description:t.description||''
+      })
     });
+    const data=await res.json();
+    if(!data.ok) throw new Error(data.error||'催进度失败');
     setUrged(p=>({...p,[t.id]:true}));
-    showToast('⚡ 催进度已发送给奇点');
+    showToast('⚡ 催进度已交给奇点发送');
     setTimeout(()=>setUrged(p=>({...p,[t.id]:false})),3000);
   };
 
