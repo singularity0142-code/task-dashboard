@@ -645,7 +645,7 @@ const SURL='https://nkkbvhtmlooverkhyqsa.supabase.co';
 const SKEY=['eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9','.eyJpc3MiOiJzdXBhYmFzZ','SIsInJlZiI6Im5ra2J2aH','RtbG9vdmVya2h5cXNhIiwi','cm9sZSI6ImFub24iLCJpYX','QiOjE3NzU2OTM1NTksImV4','cCI6MjA5MTI2OTU1OX0.7o','RpImggZHpvusrS6kJKWN6c','v12hYG4NqxUFCIZDCIs'].join('');
 const SB=supabase.createClient(SURL,SKEY);
 const PROJECTS=['w','理享招生项目'];
-const PROJECT_MEMBERS={
+const FALLBACK_PROJECT_MEMBERS={
   'w':[],
   '理享招生项目':[
     {name:'韩笑',  role:'业务负责人',    leader:true},
@@ -655,7 +655,108 @@ const PROJECT_MEMBERS={
     {name:'王玟',  role:'',             leader:false},
   ],
 };
-const ALL_MEMBERS=['韩笑','吴晓磊','陈冬梅','张娜娜','张慧'];
+const FALLBACK_ALL_MEMBERS=['韩笑','吴晓磊','陈冬梅','张娜娜','张慧'];
+const MEMBER_ROLE_MAP={
+  '韩笑':{role:'业务负责人',leader:true,project:'理享招生项目'},
+  '张娜娜':{role:'战略人才',leader:false,project:'理享招生项目'},
+  '陈冬梅':{role:'财务',leader:false,project:'理享招生项目'},
+  '吴晓磊':{role:'特定技能辅导师',leader:false,project:'理享招生项目'},
+  '王玟':{role:'',leader:false,project:'理享招生项目'},
+};
+const FALLBACK_MEMBER_ALIASES={
+  '王玟':['王玟','王文','王雯','wangwen','wang wen','wangw','小玟','阿玟'],
+  '张慧':['张慧','张会','zhanghui','zhang hui'],
+  '韩笑':['韩笑','韩啸','hanxiao','han xiao','汉笑','含笑','韩晓','憨笑','寒笑','han show','HanXiao','Hanxiao','hanshow','韩效','韩孝'],
+  '秦文浩':['秦文浩','qinwenhao','文浩'],
+  '朱妍莉':['朱妍莉','朱艳丽','zhuyali','朱妍'],
+  '巢峰':['巢峰','chaofeng','小巢'],
+  '刘菲':['刘菲','liufei','liu fei'],
+  '陈伟':['陈伟','chenwei','chen wei'],
+  '张娜娜':['张娜娜','zhangnana','娜娜'],
+  '徐媛':['徐媛','xuyuan','xu yuan'],
+  '张朝强':['张朝强','zhangchaoqiang','朝强'],
+  '骆天虹':['骆天虹','luotianhong','天虹'],
+  '汪汛':['汪汛','wangxun','wang xun'],
+  '王杰':['王杰','wangjie','wang jie'],
+  '王理群':['王理群','wangliqun','理群'],
+  '陈冬梅':['陈冬梅','chendongmei','chen dongmei','冬梅'],
+  '王寿忠':['王寿忠','wangshouzhong','寿忠'],
+  '吴晓磊':['吴晓磊','wuxiaolei','wu xiaolei','晓磊','吴晓'],
+};
+let PROJECT_MEMBERS=JSON.parse(JSON.stringify(FALLBACK_PROJECT_MEMBERS));
+let ALL_MEMBERS=[...FALLBACK_ALL_MEMBERS];
+let MEMBER_ALIASES={};
+let ALIAS_MAP={};
+let VC_MEMBERS={};
+let ROSTER_READY=false;
+
+function rebuildAliasMap(){
+  ALIAS_MAP={};
+  Object.entries(MEMBER_ALIASES).forEach(([name,aliases])=>{
+    [name,...(aliases||[])].forEach(alias=>{
+      const key=String(alias||'').trim().toLowerCase();
+      if(key) ALIAS_MAP[key]=name;
+    });
+  });
+}
+
+function applyRoster(executives){
+  const execs=Array.isArray(executives)?executives:[];
+  const memberAliases={...FALLBACK_MEMBER_ALIASES};
+  const memberChatIds={};
+  const seenNames=new Set(FALLBACK_ALL_MEMBERS);
+  const allMembers=[...FALLBACK_ALL_MEMBERS];
+  const projMembers=JSON.parse(JSON.stringify(FALLBACK_PROJECT_MEMBERS));
+
+  execs.forEach(exec=>{
+    const name=String(exec.name||'').trim();
+    if(!name) return;
+    if(!seenNames.has(name)){
+      seenNames.add(name);
+      allMembers.push(name);
+    }
+    const aliases=[name,...(Array.isArray(exec.aliases)?exec.aliases:[])].filter(Boolean);
+    memberAliases[name]=Array.from(new Set([...(memberAliases[name]||[]),...aliases]));
+    if(exec.human_chat_id) memberChatIds[name]=String(exec.human_chat_id);
+
+    const roleInfo=MEMBER_ROLE_MAP[name];
+    if(roleInfo&&roleInfo.project){
+      const current=projMembers[roleInfo.project]||[];
+      const existing=current.find(item=>item.name===name);
+      if(existing){
+        existing.role=roleInfo.role||existing.role||'';
+        existing.leader=!!roleInfo.leader;
+      }else{
+        current.push({name,role:roleInfo.role||'',leader:!!roleInfo.leader});
+      }
+      projMembers[roleInfo.project]=current;
+    }
+  });
+
+  MEMBER_ALIASES=memberAliases;
+  VC_MEMBERS=memberChatIds;
+  PROJECT_MEMBERS=projMembers;
+  ALL_MEMBERS=allMembers;
+  ROSTER_READY=true;
+  rebuildAliasMap();
+}
+
+async function loadRoster(){
+  try{
+    const res=await fetch(`${BRIDGE_URL}/api/executives`);
+    const data=await res.json();
+    if(data&&Array.isArray(data.executives)&&data.executives.length>=0){
+      applyRoster(data.executives);
+      return true;
+    }
+  }catch(e){
+    console.warn('[roster] load failed',e);
+  }
+  applyRoster([]);
+  return false;
+}
+
+applyRoster([]);
 function taskToDb(t){return{id:t.id,name:t.name,assignee:t.assignee||'',deadline:t.deadline||null,priority:t.priority||'mid',status:t.status||'pending',blocker:t.blocker||'',files:t.files||[],notes:t.notes||'',project:t.project||null,created_at:t.createdAt||new Date().toISOString().split('T')[0]};}
 function dbToTask(d){return{id:d.id,name:d.name,assignee:d.assignee||'',deadline:d.deadline||'',priority:d.priority||'mid',status:d.status||'pending',blocker:d.blocker||'',files:d.files||[],notes:d.notes||'',project:d.project||'',createdAt:d.created_at||''};}
 
@@ -1168,31 +1269,6 @@ function VoiceFloat({tasks}){
   // 同步 pendingTask 到 ref（供异步回调访问最新值）
   useEffect(()=>{pendingTaskRef.current=pendingTask;},[pendingTask]);
 
-  // 成员名字 + 所有可能的拼音/谐音/英文别名
-  const MEMBER_ALIASES={
-    '王玟':  ['王玟','王文','王雯','wangwen','wang wen','wangw','小玟','阿玟'],
-    '张慧':  ['张慧','张会','zhanghui','zhang hui'],
-    '韩笑':  ['韩笑','韩啸','hanxiao','han xiao','汉笑','含笑','韩晓','憨笑','寒笑','han show','han xiao','HanXiao','Hanxiao','hanshow','韩效','韩孝'],
-    '秦文浩':['秦文浩','qinwenhao','文浩'],
-    '朱妍莉':['朱妍莉','朱艳丽','zhuyali','朱妍'],
-    '巢峰':  ['巢峰','chaofeng','小巢'],
-    '刘菲':  ['刘菲','liufei','liu fei'],
-    '陈伟':  ['陈伟','chenwei','chen wei'],
-    '张娜娜':['张娜娜','zhangnana','娜娜'],
-    '徐媛':  ['徐媛','xuyuan','xu yuan'],
-    '张朝强':['张朝强','zhangchaoqiang','朝强'],
-    '骆天虹':['骆天虹','luotianhong','天虹'],
-    '汪汛':  ['汪汛','wangxun','wang xun'],
-    '王杰':  ['王杰','wangjie','wang jie'],
-    '王理群':['王理群','wangliqun','理群'],
-    '陈冬梅':['陈冬梅','chendongmei','chen dongmei','冬梅'],
-    '王寿忠':['王寿忠','wangshouzhong','寿忠'],
-    '吴晓磊':['吴晓磊','wuxiaolei','wu xiaolei','晓磊','吴晓'],
-  };
-  // 将别名展平为查找表：别名 → 标准中文名
-  const ALIAS_MAP={};
-  Object.entries(MEMBER_ALIASES).forEach(([name,aliases])=>aliases.forEach(a=>ALIAS_MAP[a.toLowerCase()]=name));
-
   // 模糊匹配：从输入中找到成员标准名
   const fuzzyFindMember=(q)=>{
     const ql=q.toLowerCase();
@@ -1274,7 +1350,6 @@ function VoiceFloat({tasks}){
   // ── 组件级常量（供 speak / confirmProject 复用）──
   const VC_QBOT=['8770441016',':AAGP-D6f4ht','aiKDB4I2xX9','A3fffu09LueuA'].join('');
   const VC_BOSS='8666564306';
-  const VC_MEMBERS={'王玟':'7885643514','陈冬梅':'8527399930','吴晓磊':'8759710763','张娜娜':'8482000777'};
   const qSend=(chatId,text)=>fetch(`https://api.telegram.org/bot${VC_QBOT}/sendMessage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chatId,text,parse_mode:'Markdown'})});
 
   const onErr=()=>{stopBars();setPhase('idle');setStatus('出错，请重试');setTimeout(()=>setStatus('点击说话 · 可下达任务'),3000);};
@@ -2655,11 +2730,16 @@ function App(){
   const [tasks,setTasks]=useState([]);
   const [bossTasks,setBossTasks]=useState([]);
   const [loading,setLoading]=useState(true);
+  const [rosterVersion,setRosterVersion]=useState(0);
   const [showForm,setShowForm]=useState(false);
   const [editTask,setEditTask]=useState(null);
   const [toast,setToast]=useState(null);
   const [page,setPage]=useState('home');
   const [drawer,setDrawer]=useState(null);
+
+  useEffect(()=>{
+    loadRoster().finally(()=>setRosterVersion(v=>v+1));
+  },[]);
 
   // boss_tasks 拉取 + 新回复通知 + 30s 轮询
   const prevBTDescRef=useRef({});   // {taskId: descLength}
