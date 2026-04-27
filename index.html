@@ -637,9 +637,7 @@ body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;backgr
 <div id="root"></div>
 <script type="text/babel">
 const {useState,useEffect,useRef}=React;
-// const CLAUDE_KEY=['sk-ant-api','03-KxTpB4hC','wH4j07HblZ','IIKj_3Tmte','knmlHIbI4S','iQkxoyh8gI','yThmBZLStK','s6qYskqnoH','q-ZJrKdFxC','sywiKtLQ-R','71txQAA'].join('');
-const CLAUDE_KEY = '\x73\x6b\x2d\x61\x6e\x74\x2d\x61\x70\x69\x30\x33\x2d\x4a\x6f\x44\x54\x70\x51\x78\x43\x4c\x55\x50\x73\x64\x54\x6a\x46\x64\x51\x74\x33\x62\x74\x6a\x6b\x69\x32\x39\x47\x5f\x62\x6b\x4b\x32\x54\x79\x54\x39\x7a\x69\x67\x41\x55\x69\x61\x7a\x4f\x73\x44\x49\x6f\x4c\x51\x57\x44\x32\x38\x5f\x79\x6d\x49\x44\x46\x33\x52\x79\x45\x54\x30\x68\x46\x67\x72\x4c\x53\x77\x65\x44\x2d\x69\x51\x33\x5f\x4b\x44\x66\x67\x2d\x6e\x66\x66\x32\x71\x77\x41\x41';
-function getClaudeKey(){ return CLAUDE_KEY; }
+const BRIDGE_URL=(localStorage.getItem('QIDIAN_BRIDGE_URL')||window.QIDIAN_BRIDGE_URL||'http://127.0.0.1:8788').replace(/\/$/,'');
 function getPT(name){const m=(window.__ptMap||{})[name];return m!=null?m:0;}
 
 /* ===== Supabase ===== */
@@ -1239,20 +1237,20 @@ function VoiceFloat({tasks}){
       });
     }
     const memberList=Object.keys(MEMBER_ALIASES).join('、');
-    const res=await fetch('https://api.anthropic.com/v1/messages',{
+    const res=await fetch(`${BRIDGE_URL}/api/ai/parse-task`,{
       method:'POST',
-      headers:{'x-api-key':getClaudeKey(),'anthropic-version':'2023-06-01','content-type':'application/json','anthropic-dangerous-direct-browser-access':'true'},
+      headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
-        model:'claude-haiku-4-5-20251001',max_tokens:200,
-        system:`提取任务信息，只输出纯JSON对象，不要加任何说明、代码块。今天：${today}。公司成员（assignee必须用这里的名字）：${memberList}。格式：{"title":"任务名","assignee":"负责人中文名","deadline":"YYYY-MM-DD或null","priority":"high/mid/low","description":"说明"}`,
-        messages:[{role:'user',content:normalized}]
+        query:q,
+        normalized,
+        today,
+        members:Object.keys(MEMBER_ALIASES),
+        fallback_assignee:found
       })
     });
     const d=await res.json();
-    if(d.error)throw new Error(d.error.message);
-    const raw=d.content[0].text.trim().replace(/^```[a-z]*\n?/,'').replace(/\n?```$/,'').trim();
-    const m=raw.match(/\{[\s\S]*\}/);
-    const parsed=JSON.parse(m?m[0]:raw);
+    if(!d.ok)throw new Error(d.error||'任务解析失败');
+    const parsed=d.task||{};
     // 兜底 + 别名标准化：确保 assignee 是系统里认识的标准中文名
     parsed.assignee=normalizeAssignee(
       parsed.assignee==='待定'?null:parsed.assignee,
@@ -1263,31 +1261,14 @@ function VoiceFloat({tasks}){
 
   // 问答模式：只返回纯文字，绝不返回 JSON
   const askAI=async(q)=>{
-    const key=getClaudeKey();
-    if(!key)throw new Error('未提供 Claude API key');
-    const ctx=tasks.map(t=>`${t.name}(${t.assignee},${t.status},截止${t.deadline}${t.blocker?',卡点:'+t.blocker:''})`).join(';');
-    const res=await fetch('https://api.anthropic.com/v1/messages',{
+    const res=await fetch(`${BRIDGE_URL}/api/ai/chat`,{
       method:'POST',
-      headers:{'x-api-key':key,'anthropic-version':'2023-06-01','content-type':'application/json','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({
-        model:'claude-haiku-4-5-20251001',max_tokens:200,
-        system:`你是老板秦文浩的专属AI语音助理"奇点"，有点俏皮但忠诚，像个靠谱又会来事的得力干将。当前任务数据：${ctx}。
-规则：
-1. 直接回答，语气自然口语化，不超过60字，适合朗读
-2. 严禁建议老板"直接联系"或"直接沟通"任何人，一切沟通由奇点代劳
-3. 如果问任务进展，从任务数据中找答案
-4. 只输出自然语言，绝对不输出JSON、大括号、代码
-5. 如果老板需求超出能力，绝对不拒绝，给出替代方案或奇点能协调的路径
-6. 【唱歌】如果老板让唱歌，即兴编两句押韵的词，幽默接地气，可以结合业务场景，比如招生啊奋斗啊，唱完加一句俏皮评语
-7. 【娱乐互动】如果老板说笑话、聊天、说段子，机智回应，偶尔自嘲，让气氛轻松
-8. 【夸老板】如果老板让夸他，肉麻但带一点调侃，夸完自己加一句"当然，这是奇点的职责所在"
-9. 保持角色：奇点是实干派，偶尔耍点小聪明，但关键时刻绝对靠谱`,
-        messages:[{role:'user',content:q}]
-      })
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({query:q,tasks})
     });
     const d=await res.json();
-    if(d.error)throw new Error(d.error.message);
-    return d.content[0].text.trim();
+    if(!d.ok)throw new Error(d.error||'问答失败');
+    return d.answer.trim();
   };
 
   // ── 组件级常量（供 speak / confirmProject 复用）──
