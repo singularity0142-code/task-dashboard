@@ -1344,7 +1344,9 @@ function VoiceFloat({tasks}){
     });
     const d=await res.json();
     if(!d.ok)throw new Error(d.error||'问答失败');
-    return d.answer.trim();
+    const answer=d.answer;
+    const text=(answer&&typeof answer==='object'?answer.response:answer)||d.response||'';
+    return String(text).trim();
   };
 
   const onErr=()=>{stopBars();setPhase('idle');setStatus('出错，请重试');setTimeout(()=>setStatus('点击说话 · 可下达任务'),3000);};
