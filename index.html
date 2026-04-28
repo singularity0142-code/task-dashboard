@@ -1348,7 +1348,7 @@ function VoiceFloat({tasks}){
     if(typeof answer==='string'){
       try{answer=JSON.parse(answer);}catch(_){}
     }
-    const text=(answer&&typeof answer==='object'?(answer.response||answer.text):answer)||d.response||'';
+    const text=(answer&&typeof answer==='object'?(answer.response||answer.reply||answer.text||answer.answer||answer.content):answer)||d.response||'';
     return String(text).trim();
   };
 
