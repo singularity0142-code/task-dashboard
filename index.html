@@ -1202,7 +1202,7 @@ function VoiceFloat({tasks}){
     return null;
   };
 
-  // 校验并修正 assignee：如果 Claude 返回的不是标准名，尝试从别名中找
+  // 校验并修正 assignee：如果 AI 返回的不是标准名，尝试从别名中找
   const normalizeAssignee=(raw,fallback)=>{
     if(!raw) return fallback||null;
     const knownNames=Object.keys(MEMBER_ALIASES);

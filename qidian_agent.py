@@ -12,7 +12,8 @@ import time, json, urllib.request, urllib.parse, urllib.error, re, os, math
 from datetime import datetime
 
 # ── 配置 ──────────────────────────────────────────────
-CLAUDE_KEY = ''.join(['sk-ant-api','03-KxTpB4hC','wH4j07HblZ','IIKj_3Tmte','knmlHIbI4S','iQkxoyh8gI','yThmBZLStK','s6qYskqnoH','q-ZJrKdFxC','sywiKtLQ-R','71txQAA'])
+OPENAI_KEY = os.getenv('OPENAI_API_KEY') or 'sk-openai-api-key-fill-me'
+OPENAI_MODEL = os.getenv('OPENAI_MODEL') or 'gpt-4.1-mini'
 QIDIAN_BOT = '8770441016:AAGP-D6f4htaiKDB4I2xX9A3fffu09LueuA'
 BOSS_CHAT   = '8666564306'   # 秦文浩（WENHAO QIN）
 
@@ -132,31 +133,33 @@ def insert_finance_record(project, type_, category, amount, note, reporter):
     print(f'[💰 财务录入] {reporter} | {type_} ¥{amount} | {category} | 项目:{project}')
     return result
 
-def call_claude(system_prompt, user_content, max_tokens=300):
-    """调用 Claude Haiku API"""
-    url = 'https://api.anthropic.com/v1/messages'
+def call_openai(system_prompt, user_content, max_tokens=300):
+    """调用 OpenAI Chat Completions API，返回纯文本内容。"""
+    url = 'https://api.openai.com/v1/chat/completions'
     body = json.dumps({
-        'model': 'claude-haiku-4-5-20251001',
+        'model': OPENAI_MODEL,
         'max_tokens': max_tokens,
-        'system': system_prompt,
-        'messages': [{'role': 'user', 'content': user_content}]
+        'temperature': 0,
+        'messages': [
+            {'role': 'system', 'content': system_prompt},
+            {'role': 'user', 'content': user_content},
+        ]
     }).encode()
     req = urllib.request.Request(url, data=body, headers={
-        'x-api-key': CLAUDE_KEY,
-        'anthropic-version': '2023-06-01',
+        'Authorization': f'Bearer {OPENAI_KEY}',
         'content-type': 'application/json',
     }, method='POST')
     try:
         with urllib.request.urlopen(req, timeout=8) as r:   # 超时从15s缩短到8s
             d = json.loads(r.read())
-            return d['content'][0]['text'].strip()
+            return d['choices'][0]['message']['content'].strip()
     except Exception as e:
-        print(f'[Claude调用失败] {e}')
+        print(f'[OpenAI调用失败] {e}')
         return None
 
 
 def parse_member_message(text, reporter='', known_project=None):
-    """一次 Claude 调用同时提取财务记录 + 进度数量，避免两次串行调用"""
+    """一次 AI 调用同时提取财务记录 + 进度数量，避免两次串行调用"""
     proj_list = ', '.join(list(PROJECT_ALIASES.keys()) + ['其他'])
     default_proj_hint = f'（如果消息中没有明确项目名，优先填"{known_project}"）' if known_project else ''
     system = f"""你是财务+进度信息提取助手。从员工消息中同时提取：
@@ -177,7 +180,7 @@ progress rules:
 - count: 本次新增数量（不是累计），0表示没有进度信息
 
 如果没有财务信息，finance=[]；如果没有进度信息，progress={{"is_progress":false,"count":0}}"""
-    raw = call_claude(system, text, max_tokens=400)
+    raw = call_openai(system, text, max_tokens=400)
     if not raw:
         return [], None
     try:
@@ -255,7 +258,7 @@ def normalize_amount(val):
 
 
 def parse_finance_from_text(text, reporter=''):
-    """用 Claude AI 从成员消息中提取财务信息，返回 list of records"""
+    """用 AI 从成员消息中提取财务信息，返回 list of records"""
     proj_list = ', '.join(list(PROJECT_ALIASES.keys()) + ['其他'])
     system = f"""你是财务信息提取助手。从用户的消息中提取所有收入和支出信息。
 可识别的项目：{proj_list}
@@ -269,7 +272,7 @@ def parse_finance_from_text(text, reporter=''):
 如果消息中没有任何财务信息，输出空数组 []
 只输出JSON，不要任何解释。"""
 
-    raw = call_claude(system, text)
+    raw = call_openai(system, text)
     if not raw:
         return []
     try:
@@ -279,7 +282,7 @@ def parse_finance_from_text(text, reporter=''):
         records = json.loads(m.group(0))
         for r in records:
             r['reporter'] = reporter
-            # 用 normalize_amount 兜底，防止 Claude 返回非纯数字
+            # 用 normalize_amount 兜底，防止模型返回非纯数字
             r['amount'] = normalize_amount(r.get('amount', 0))
         # 如果有明确项目，把"其他"记录也统一改为该项目
         specific_projects = [r['project'] for r in records if r.get('project') and r['project'] != '其他']
@@ -294,7 +297,7 @@ def parse_finance_from_text(text, reporter=''):
         return []
 
 def parse_boss_command(text):
-    """用 Claude 解析老板的任务指令，返回任务信息或 None"""
+    """用 AI 解析老板的任务指令，返回任务信息或 None"""
     members = '、'.join(list(NAME_ALIASES.keys()))
     projects = '、'.join(list(PROJECT_ALIASES.keys()) + ['其他'])
     system = f"""你是任务解析助手。从老板的指令中提取任务信息。
@@ -305,7 +308,7 @@ def parse_boss_command(text):
 - target: 如果有明确数量目标（如招生100人、拜访50家客户），填数字，否则null
 - 如果消息不是任务指令（闲聊/问候/查询），输出 {{"type":"non_task"}}
 只输出JSON，不要解释。"""
-    raw = call_claude(system, text)
+    raw = call_openai(system, text)
     if not raw:
         return None
     try:
@@ -331,7 +334,7 @@ def parse_progress_report(text):
 如果包含，输出 {"is_progress":true,"count":数字}
 如果不包含，输出 {"is_progress":false}
 只输出JSON。"""
-    raw = call_claude(system, text, max_tokens=80)
+    raw = call_openai(system, text, max_tokens=80)
     if not raw:
         return None
     try:
@@ -664,7 +667,7 @@ def handle_member_reply(chat_id, text, from_name, reply_to_msg_id=None):
     else:
         task = match_task_by_reply(text, active_tasks, member_name)
 
-    # ── 财务 + 进度一次性解析（单次 Claude 调用）──
+    # ── 财务 + 进度一次性解析（单次 AI 调用）──
     has_content = any(kw in text for kw in FINANCE_KEYWORDS + PROGRESS_KEYWORDS)
     fin_records = []
     progress_report = None
