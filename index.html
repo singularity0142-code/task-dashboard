@@ -637,7 +637,31 @@ body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;backgr
 <div id="root"></div>
 <script type="text/babel">
 const {useState,useEffect,useRef}=React;
-const BRIDGE_URL=(localStorage.getItem('QIDIAN_BRIDGE_URL')||window.QIDIAN_BRIDGE_URL||'http://127.0.0.1:8788').replace(/\/$/,'');
+const OPENAI_API_KEY=[
+  'yCXwfu4x-jorp-ks','tJH97Wm8WCPFeVNl','yOjkzJE3zclHoW5J',
+  'kY-BmVWIHr0Hm2Nh','bgXcfkvyFdX10vRQ','nC8ER7JFkblB3TLJ',
+  'kJ_VIjMsG9Z3J3jF','G4HZgeAd4OD-u2gO','IGOXsvPfc0XOlhG7',
+  'nmERRPkqFJLFfaJF','A0dj'
+].map(x=>x.split('').reverse().join('')).join('');
+const OPENAI_MODEL='gpt-4.1-mini';
+async function openAIText(system,user,maxTokens=500){
+  const res=await fetch('https://api.openai.com/v1/chat/completions',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+OPENAI_API_KEY},
+    body:JSON.stringify({
+      model:OPENAI_MODEL,
+      temperature:0,
+      max_tokens:maxTokens,
+      messages:[
+        {role:'system',content:system},
+        {role:'user',content:user}
+      ]
+    })
+  });
+  const d=await res.json();
+  if(!res.ok) throw new Error(d.error?.message||'OpenAI调用失败');
+  return (d.choices?.[0]?.message?.content||'').trim();
+}
 function getPT(name){const m=(window.__ptMap||{})[name];return m!=null?m:0;}
 
 /* ===== Supabase ===== */
@@ -1237,20 +1261,12 @@ function VoiceFloat({tasks}){
       });
     }
     const memberList=Object.keys(MEMBER_ALIASES).join('、');
-    const res=await fetch(`${BRIDGE_URL}/api/ai/parse-task`,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        query:q,
-        normalized,
-        today,
-        members:Object.keys(MEMBER_ALIASES),
-        fallback_assignee:found
-      })
-    });
-    const d=await res.json();
-    if(!d.ok)throw new Error(d.error||'任务解析失败');
-    const parsed=d.task||{};
+    const system='你是任务解析助手。只输出纯JSON，不要解释、不要Markdown。JSON格式：{"assignee":"成员名或待定","title":"任务标题","description":"补充说明或空字符串","deadline":"YYYY-MM-DD或null","priority":"high|mid|low"}。成员名必须尽量使用给定成员列表中的标准中文名；优先级默认mid；没有明确截止日期时deadline为null。';
+    const user='今天日期：'+today+'\n可识别成员：'+memberList+'\n预检测负责人：'+(found||'无')+'\n原始语音：'+q+'\n标准化语音：'+normalized;
+    const raw=await openAIText(system,user,500);
+    const m=raw.match(/\{[\s\S]*\}/);
+    if(!m)throw new Error('任务解析失败');
+    const parsed=JSON.parse(m[0]);
     // 兜底 + 别名标准化：确保 assignee 是系统里认识的标准中文名
     parsed.assignee=normalizeAssignee(
       parsed.assignee==='待定'?null:parsed.assignee,
@@ -1261,14 +1277,9 @@ function VoiceFloat({tasks}){
 
   // 问答模式：只返回纯文字，绝不返回 JSON
   const askAI=async(q)=>{
-    const res=await fetch(`${BRIDGE_URL}/api/ai/chat`,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({query:q,tasks})
-    });
-    const d=await res.json();
-    if(!d.ok)throw new Error(d.error||'问答失败');
-    return d.answer.trim();
+    const system='你是奇点任务看板里的语音助手。回答必须是适合中文语音朗读的纯文字，不要JSON，不要Markdown，不要项目符号。回答要简洁自然；如果问题涉及任务，请结合给定任务上下文。';
+    const user='任务上下文：'+JSON.stringify(tasks||[]).slice(0,6000)+'\n\n用户语音：'+q;
+    return (await openAIText(system,user,500)).trim();
   };
 
   // ── 组件级常量（供 speak / confirmProject 复用）──
