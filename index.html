@@ -1468,7 +1468,7 @@ function VoiceFloat({tasks}){
     const _targetN=_isRecruitTask&&_numM?parseInt(_numM[1]):0;
     const _targetPrefix=_targetN>0?('[target:'+_targetN+']\n[progress:0]\n'):'';
     const btDesc=_targetPrefix+(task.description||'');
-    const bt={id:tid,title:task.title||'',assignee,deadline:task.deadline||null,priority:task.priority||'mid',description:btDesc,status:'in-progress',tg_sent:true,qidian_notified:true,created_at:new Date().toISOString()};
+    const bt={id:tid,title:task.title||'',assignee,deadline:task.deadline||null,priority:task.priority||'mid',description:btDesc,status:'in-progress',tg_sent:false,qidian_notified:false,created_at:new Date().toISOString()};
     const insertRes=await SB.from('boss_tasks').insert([bt]);
     if(insertRes.error) console.error('[boss_tasks insert 失败]',insertRes.error);
     const taskRow={id:Date.now(),name:task.title||'',assignee,deadline:task.deadline||null,priority:task.priority||'mid',status:'in-progress',blocker:'',files:[],notes:task.description||'',project:proj==='其他'?null:proj,created_at:(task.deadline||new Date().toISOString().split('T')[0])};
@@ -1509,8 +1509,16 @@ function VoiceFloat({tasks}){
       });
       const actionData=await actionRes.json();
       queued=!!actionData.ok;
-      if(!actionData.ok) console.warn('[frontend-action失败]',actionData);
-    }catch(e){console.warn('[frontend-action异常]',e);}
+      if(actionData.ok){
+        await SB.from('boss_tasks').update({tg_sent:true,qidian_notified:true,qidian_dispatched_at:new Date().toISOString(),qidian_dispatch_error:null}).eq('id',tid);
+      }else{
+        console.warn('[frontend-action失败]',actionData);
+        await SB.from('boss_tasks').update({qidian_dispatch_error:actionData.error||'frontend-action失败'}).eq('id',tid);
+      }
+    }catch(e){
+      console.warn('[frontend-action异常]',e);
+      await SB.from('boss_tasks').update({qidian_dispatch_error:String(e&&e.message||e)}).eq('id',tid);
+    }
 
     // 4. 语音确认（speak 会自动恢复监听）
     const coSpeak=(isRecruit&&assignee==='韩笑')?' 吴晓磊也会协同跟进。':'';
