@@ -1344,8 +1344,11 @@ function VoiceFloat({tasks}){
     });
     const d=await res.json();
     if(!d.ok)throw new Error(d.error||'问答失败');
-    const answer=d.answer;
-    const text=(answer&&typeof answer==='object'?answer.response:answer)||d.response||'';
+    let answer=d.answer;
+    if(typeof answer==='string'){
+      try{answer=JSON.parse(answer);}catch(_){}
+    }
+    const text=(answer&&typeof answer==='object'?(answer.response||answer.text):answer)||d.response||'';
     return String(text).trim();
   };
 
