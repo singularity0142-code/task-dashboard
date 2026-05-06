@@ -1453,24 +1453,37 @@ function VoiceFloat({tasks}){
     setDraft(prev=>{const next={...prev,[field]:value};draftRef.current=next;return next;});
   };
 
-  // Required slots for dispatch. star uses priority as legacy fallback.
+  // Required slots for dispatch.
+  // title/assignee/deadline: ask only if LLM didn't fill them.
+  // star + project: ALWAYS shown — boss must explicitly confirm urgency and project bucket.
+  // (LLM auto-fills priority='mid' even without an urgency cue, so we can't trust it
+  //  as a real boss-supplied star — always require explicit confirmation.)
   const computeMissingFields=(task)=>{
     const out=[];
-    for(const f of ['title','assignee','deadline','star']){
-      const v=f==='star'?(task.star??task.priority):task[f];
+    for(const f of ['title','assignee','deadline']){
+      const v=task[f];
       if(v==null || (typeof v==='string' && !v.trim())) out.push(f);
     }
-    if(!task.project) out.push('project'); // always confirm project
+    out.push('star','project');
     return out;
   };
+
+  // LLM-extracted priority (high/mid/low string) → star (1-5 int) for the picker pre-fill.
+  // High priority maps to 4 (not 5) so boss has to actively click ★★★★★ for "actually urgent".
+  const PRIORITY_TO_STAR={high:4,mid:3,low:2};
+  // Star (1-5 int) → priority (low/mid/high string) for boss_tasks/tasks/frontend-actions write.
+  const STAR_TO_PRIORITY={1:'low',2:'low',3:'mid',4:'high',5:'high'};
 
   // Show MultiFieldPicker; resolves with merged task (or null on cancel).
   const fillMissing=(task)=>{
     let cur={...task};
-    if(cur.star==null && cur.priority!=null) cur.star=cur.priority;
     const missing=computeMissingFields(cur);
     if(missing.length===0) return Promise.resolve(cur);
-    setDraft({});draftRef.current={};
+    // Pre-fill draft.star from LLM-extracted priority so the popup shows a sensible
+    // default selected, but boss can still change it before派单.
+    const initialDraft={};
+    if(cur.priority && PRIORITY_TO_STAR[cur.priority]!=null) initialDraft.star=PRIORITY_TO_STAR[cur.priority];
+    setDraft(initialDraft);draftRef.current={...initialDraft};
     return new Promise(resolve=>{
       multiResolveRef.current=resolve;
       setPendingTask({parsed:cur,missing});
@@ -1497,7 +1510,8 @@ function VoiceFloat({tasks}){
 
   const onMultiConfirm=(merged)=>{
     _silencePopupVoice();
-    if(merged.star!=null && merged.priority==null) merged.priority=merged.star;
+    // Boss's star pick (1-5 int) is the source of truth — overwrite any LLM-guessed priority.
+    if(merged.star!=null) merged.priority=STAR_TO_PRIORITY[merged.star]||'mid';
     const r=multiResolveRef.current;
     multiResolveRef.current=null;
     setPendingTask(null);pendingTaskRef.current=null;
@@ -1533,7 +1547,9 @@ function VoiceFloat({tasks}){
       const cur=pendingTaskRef.current?.parsed||{};
       const updates={};
       for(const f of missing){
-        const already=draftRef.current[f]??(f==='star'?(cur.star??cur.priority):cur[f]);
+        // For star/project, only treat as already-filled if boss explicitly picked
+        // it in this popup session (draftRef). LLM's priority guess doesn't count.
+        const already=(f==='star'||f==='project')?draftRef.current[f]:(draftRef.current[f]??cur[f]);
         if(already!=null && (typeof already!=='string' || already.trim())) continue;
         if(f==='title'){
           const t=transcript.trim();
