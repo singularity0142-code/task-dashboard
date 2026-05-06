@@ -1251,6 +1251,100 @@ function Avatar({tasks, large}){
   );
 }
 
+/* ── Missing-field picker helpers ── */
+const _pad2=n=>String(n).padStart(2,'0');
+const _isoDate=d=>`${d.getFullYear()}-${_pad2(d.getMonth()+1)}-${_pad2(d.getDate())}`;
+function deadlineQuickOptions(){
+  const t=new Date();
+  const tomorrow=new Date(t); tomorrow.setDate(t.getDate()+1);
+  const eow=new Date(t); eow.setDate(t.getDate()+(7-t.getDay()||7)); // Sunday
+  const eonw=new Date(eow); eonw.setDate(eow.getDate()+7);
+  return [
+    {value:_isoDate(t),label:'今天'},
+    {value:_isoDate(tomorrow),label:'明天'},
+    {value:_isoDate(eow),label:'本周'},
+    {value:_isoDate(eonw),label:'下周'},
+  ];
+}
+function starOptions(){
+  return [1,2,3,4,5].map(n=>({value:n,label:'★'.repeat(n)}));
+}
+function assigneeOptions(){
+  return Object.keys(MEMBER_ALIASES).map(n=>({value:n,label:n}));
+}
+function projectOptions(){
+  return PROJECTS.map(p=>({value:p,label:p}));
+}
+
+/* Voice → option matchers (return matched option.value or null) */
+function matchAssigneeFromVoice(transcript){
+  const ql=transcript.toLowerCase();
+  for(const [alias,name] of Object.entries(ALIAS_MAP)){
+    if(ql.includes(alias)) return name;
+  }
+  return null;
+}
+function matchDeadlineFromVoice(transcript){
+  const t=transcript;
+  const opts=deadlineQuickOptions();
+  if(/今天|今儿/.test(t)) return opts[0].value;
+  if(/明天|明儿/.test(t)) return opts[1].value;
+  if(/本周|这周|这礼拜|周末/.test(t)) return opts[2].value;
+  if(/下周|下礼拜/.test(t)) return opts[3].value;
+  // YYYY-MM-DD
+  const m=t.match(/(\d{4})[-年/](\d{1,2})[-月/](\d{1,2})/);
+  if(m) return `${m[1]}-${_pad2(m[2])}-${_pad2(m[3])}`;
+  return null;
+}
+const _STAR_WORD={'一':1,'二':2,'两':2,'三':3,'四':4,'五':5};
+function matchStarFromVoice(transcript){
+  const t=transcript;
+  const m=t.match(/([一二两三四五12345])\s*星/);
+  if(m){
+    const ch=m[1];
+    return _STAR_WORD[ch] ?? parseInt(ch);
+  }
+  if(/最急|紧急|加急|火烧|马上/.test(t)) return 5;
+  if(/不急|随便|有空|啥时候都行/.test(t)) return 1;
+  return null;
+}
+function matchProjectFromVoice(transcript){
+  if(/理享|招生/.test(transcript)) return '理享招生项目';
+  if(/其他|别的|暂时/.test(transcript)) return '其他';
+  return null;
+}
+const VOICE_MATCHERS={assignee:matchAssigneeFromVoice,deadline:matchDeadlineFromVoice,star:matchStarFromVoice,project:matchProjectFromVoice};
+
+/* ── Generic Missing-Field Picker component ── */
+function MissingFieldPicker({field,prompt,task,options,onPick,allowDateInput,allowOther}){
+  const [customDate,setCustomDate]=useState('');
+  const taskHint=task?(`「${task.title||'（未命名）'}」→ ${task.assignee||'待定'}`):'';
+  return (
+    <div className="mf-picker">
+      <div className="mf-picker-title">{prompt}</div>
+      {taskHint && <div className="mf-picker-task">{taskHint}</div>}
+      <div className="mf-picker-btns">
+        {options.map(opt=>(
+          <button key={String(opt.value)}
+                  className={'mf-picker-btn'+(field==='star'?' star':'')}
+                  onClick={()=>onPick(opt.value)}>
+            {opt.label}
+          </button>
+        ))}
+        {allowOther && (
+          <button className="mf-picker-btn other" onClick={()=>onPick('其他')}>📁 其他</button>
+        )}
+      </div>
+      {allowDateInput && (
+        <div className="mf-picker-date">
+          <input type="date" value={customDate} onChange={e=>setCustomDate(e.target.value)} />
+          <button onClick={()=>customDate&&onPick(customDate)}>确定</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* Voice Float — press & hold to talk with AI */
 function VoiceFloat({tasks}){
   const [phase,setPhase]=useState('idle');
