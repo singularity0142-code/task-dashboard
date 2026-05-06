@@ -1603,14 +1603,10 @@ function VoiceFloat({tasks}){
         if(isTaskIntent(transcript)){
           parseTaskAI(transcript).then(async task=>{
             stopBars();
-            const pt={parsed:task,askField:'project'};
-            pendingTaskRef.current=pt;
-            setPendingTask(pt);
-            const projList=PROJECTS.join('、');
-            const prompt='任务已识别：'+(task.title||'新任务')+'，交给'+(task.assignee||'待定')+'。请问归哪个项目？可以说：'+projList+'，或者其他。';
-            setPhase('talking');setStatus('奇点提问中...');startBars();
-            beepFn(1047,.05,0);beepFn(1319,.06,.1);
-            makeTTS(prompt).then(()=>{stopBars();startPickerListen();});
+            try{
+              const filled=await fillMissing(task);
+              await confirmAndDispatch(filled);
+            }catch(e){console.error('[fillMissing]',e);onErr();}
           }).catch(onErr);
         } else {
           askAI(transcript).then(ans=>speak(ans)).catch(onErr);
@@ -1638,31 +1634,6 @@ function VoiceFloat({tasks}){
       return;
     }
     startMainListen(true);
-  };
-
-  // 语音监听项目选择（picker出现后自动调用）
-  const startPickerListen=()=>{
-    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-    if(!SR||!pendingTaskRef.current) return;
-    pickerListenRef.current=true;
-    const r=new SR();
-    r.lang='zh-CN';r.continuous=false;r.interimResults=false;r.maxAlternatives=3;
-    recogRef.current=r;
-    setPhase('rec');setStatus('请说项目名称...');startBars();
-    r.onresult=ev=>{
-      pickerListenRef.current=false;
-      stopBars();setPhase('proc');
-      const alts=Array.from(ev.results[0]).map(a=>a.transcript);
-      const t=alts.join(' ');
-      let proj=null;
-      if(/理享|招生/.test(t)) proj='理享招生项目';
-      else if(/其他|别的|暂时/.test(t)) proj='其他';
-      else proj='w';
-      confirmProject(proj);
-    };
-    r.onerror=()=>{pickerListenRef.current=false;stopBars();setPhase('idle');setStatus('点击说话 · 可下达任务');};
-    r.onend=()=>{if(pickerListenRef.current){pickerListenRef.current=false;stopBars();setPhase('idle');setStatus('点击说话 · 可下达任务');}};
-    r.start();
   };
 
   // 老板选了项目后，执行存档 + 通知
