@@ -1358,6 +1358,115 @@ function VoiceFloat({tasks}){
   const gotResultRef=useRef(false); // 防止onend覆盖onresult
   const pickerListenRef=useRef(false); // 是否在等待语音选项目
 
+  const FIELD_ORDER=['title','assignee','deadline','star','project'];
+  const askingRef=useRef(null); // {field, resolve}
+
+  // Build picker config for current field
+  const pickerConfigFor=(field)=>{
+    if(field==='assignee') return {options:assigneeOptions(),allowDateInput:false,allowOther:false};
+    if(field==='deadline') return {options:deadlineQuickOptions(),allowDateInput:true,allowOther:false};
+    if(field==='star') return {options:starOptions(),allowDateInput:false,allowOther:false};
+    if(field==='project') return {options:projectOptions(),allowDateInput:false,allowOther:true};
+    return {options:[],allowDateInput:false,allowOther:false}; // title: voice/text only
+  };
+
+  // Ask bridge for the natural-language prompt for this field
+  const fetchPrompt=async(task,missing)=>{
+    try{
+      const r=await fetch(`${BRIDGE_URL}/api/ai/ask-missing`,{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({task,missing})
+      });
+      const d=await r.json();
+      return (d.ok && d.prompt) ? d.prompt : `还缺${missing[0]}，补一下？`;
+    }catch(_){
+      return `还缺${missing[0]}，补一下？`;
+    }
+  };
+
+  // Show picker + TTS prompt + listen for matching voice; resolve when picked
+  const showPickerAndListen=(task,field)=>new Promise(resolve=>{
+    setPendingTask({parsed:task,askField:field});
+    pendingTaskRef.current={parsed:task,askField:field};
+    askingRef.current={field,resolve};
+    // The actual TTS+SR is started by the caller (fillMissing), not here, so we
+    // can sequence "speak prompt → then listen → then resolve on click OR voice match"
+  });
+
+  // Receive a value (from picker click or voice match) and resolve current ask
+  const resolveAsk=(value)=>{
+    const a=askingRef.current;
+    if(!a) return;
+    askingRef.current=null;
+    a.resolve(value);
+  };
+
+  // The main chain: walk FIELD_ORDER, fill each missing field
+  const fillMissing=async(task)=>{
+    let cur={...task};
+    // Map LLM "priority" key to "star" if present
+    if(cur.star==null && cur.priority!=null) cur.star=cur.priority;
+    for(const field of FIELD_ORDER){
+      const v=field==='star'?(cur.star??cur.priority):cur[field];
+      if(v!=null && (typeof v!=='string' || v.trim())) continue;
+
+      // Get a prompt from the bridge (fallback baked in)
+      const prompt=await fetchPrompt(cur,[field]);
+
+      // Speak the prompt; when TTS ends, start voice listening for this field's matcher
+      setPhase('talking');setStatus('奇点提问中...');startBars();
+      beepFn(1047,.05,0);beepFn(1319,.06,.1);
+      await makeTTS(prompt);
+      stopBars();
+
+      // Show picker UI and start voice listener; resolve via either path
+      const value=await new Promise(resolve=>{
+        askingRef.current={field,resolve};
+        setPendingTask({parsed:cur,askField:field,prompt});
+        pendingTaskRef.current={parsed:cur,askField:field,prompt};
+        startFieldVoiceListen(field);
+      });
+
+      // Cleanup picker + apply value
+      setPendingTask(null);pendingTaskRef.current=null;
+      cur[field]=value;
+      if(field==='star') cur.priority=value; // keep legacy key in sync for downstream code
+    }
+    return cur;
+  };
+
+  // Voice listener for a single missing-field round
+  const startFieldVoiceListen=(field)=>{
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR) return; // no voice; user must click
+    pickerListenRef.current=true;
+    const r=new SR();
+    r.lang='zh-CN';r.continuous=false;r.interimResults=false;r.maxAlternatives=3;
+    recogRef.current=r;
+    setPhase('rec');setStatus('请回答...');startBars();
+    r.onresult=ev=>{
+      pickerListenRef.current=false;stopBars();setPhase('proc');
+      const alts=Array.from(ev.results[0]).map(a=>a.transcript);
+      const transcript=alts.join(' ');
+      let value=null;
+      if(field==='title'){
+        value=transcript.trim()||null;
+      }else{
+        const m=VOICE_MATCHERS[field];
+        if(m) value=m(transcript);
+      }
+      if(value!=null){
+        resolveAsk(value);
+      }else{
+        // Voice didn't match — leave picker visible, user must click
+        setPhase('idle');setStatus('听不太清，点按钮选一下');
+      }
+    };
+    r.onerror=()=>{pickerListenRef.current=false;stopBars();setPhase('idle');setStatus('点按钮选一下');};
+    r.onend=()=>{if(pickerListenRef.current){pickerListenRef.current=false;stopBars();}};
+    r.start();
+  };
+
   const startBars=()=>{barTimerRef.current=setInterval(()=>setBars([...Array(5)].map(()=>Math.floor(Math.random()*9)+2)),110);};
   const stopBars=()=>{clearInterval(barTimerRef.current);setBars([3,5,3,5,3]);};
 
