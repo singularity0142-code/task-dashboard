@@ -387,8 +387,11 @@ body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;backgr
 .mf-multi-btn{flex:1 1 calc(33% - 6px);min-width:60px;padding:7px 6px;border-radius:9px;border:1.5px solid #E5E7EB;background:#F9FAFB;font-size:.78rem;font-weight:700;color:#374151;cursor:pointer;text-align:center;transition:all .12s;font-family:inherit;}
 .mf-multi-btn:hover{background:#ECFDF5;border-color:#22C55E;color:#15803D;}
 .mf-multi-btn.picked{background:#22C55E !important;border-color:#22C55E !important;color:#fff !important;}
-.mf-multi-btn.star{font-size:.95rem;color:#F59E0B;letter-spacing:1px;}
-.mf-multi-btn.star.picked{color:#fff;}
+.mf-multi-stars{display:flex;gap:2px;align-items:center;}
+.mf-multi-star{width:34px;height:34px;border:none;background:none;font-size:1.7rem;color:#E5E7EB;cursor:pointer;padding:0;line-height:1;font-family:inherit;transition:color .1s,transform .1s;}
+.mf-multi-star:hover{color:#FBBF24;transform:scale(1.18);}
+.mf-multi-star.filled{color:#F59E0B;}
+.mf-multi-star-label{margin-left:10px;font-size:.78rem;color:#6B7280;font-weight:600;}
 .mf-multi-btn.other{background:#FEF3C7;border-color:#FCD34D;color:#92400E;}
 .mf-multi-input{width:100%;box-sizing:border-box;padding:7px 10px;border-radius:8px;border:1.5px solid #D1D5DB;font-size:.8rem;font-family:inherit;outline:none;}
 .mf-multi-input:focus{border-color:#22C55E;}
@@ -1305,9 +1308,6 @@ function deadlineQuickOptions(){
     {value:_isoDate(eonw),label:'下周'},
   ];
 }
-function starOptions(){
-  return [1,2,3,4,5].map(n=>({value:n,label:'★'.repeat(n)}));
-}
 function assigneeOptions(){
   return Object.keys(MEMBER_ALIASES).map(n=>({value:n,label:n}));
 }
@@ -1417,10 +1417,11 @@ function MultiFieldPicker({task,missing,draft,onUpdate,onConfirm,onCancel}){
       {missing.includes('star') && (
         <div className="mf-multi-section">
           <div className="mf-multi-label"><span>⭐ 重要等级</span>{_check(merged.star)}</div>
-          <div className="mf-multi-btns">
-            {starOptions().map(o=>(
-              <button key={String(o.value)} className={'mf-multi-btn star'+(merged.star===o.value?' picked':'')} onClick={()=>onUpdate('star',o.value)}>{o.label}</button>
+          <div className="mf-multi-stars">
+            {[1,2,3,4,5].map(n=>(
+              <button key={n} className={'mf-multi-star'+(merged.star && merged.star>=n?' filled':'')} onClick={()=>onUpdate('star',n)} aria-label={n+'星'}>★</button>
             ))}
+            {merged.star && <span className="mf-multi-star-label">{merged.star} 星</span>}
           </div>
         </div>
       )}
