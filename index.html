@@ -1636,14 +1636,11 @@ function VoiceFloat({tasks}){
     startMainListen(true);
   };
 
-  // 老板选了项目后，执行存档 + 通知
-  const confirmProject=async(proj)=>{
-    const pt=pendingTaskRef.current;
-    if(!pt) return;
-    const {parsed:task}=pt;
-    pendingTaskRef.current=null;
-    setPendingTask(null);
+  // 接收已填完的 task，执行存档 + 通知
+  const confirmAndDispatch=async(task)=>{
+    if(!task) return;
     const assignee=task.assignee||'';
+    const proj=task.project||'其他';
     const projLabel=proj==='其他'?'其他项目':proj;
 
     // 1. 写入指令台 + 任务看板
@@ -1726,7 +1723,7 @@ function VoiceFloat({tasks}){
           task={pendingTask.parsed}
           options={projectOptions()}
           allowOther={true}
-          onPick={confirmProject}
+          onPick={(value)=>resolveAsk(value)}
         />
       )}
       <div className={statusClass}>{status}</div>
