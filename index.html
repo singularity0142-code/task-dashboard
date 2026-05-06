@@ -373,6 +373,30 @@ body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;backgr
 .mf-picker-date input{flex:1;padding:6px 8px;border-radius:8px;border:1.5px solid #D1D5DB;font-size:.78rem;font-family:inherit;outline:none;}
 .mf-picker-date input:focus{border-color:#22C55E;}
 .mf-picker-date button{padding:6px 12px;border-radius:8px;border:none;background:#22C55E;color:#fff;font-weight:700;cursor:pointer;font-size:.78rem;font-family:inherit;}
+/* ── Multi-field combined picker (one popup, all missing fields) ── */
+.mf-multi{position:fixed;bottom:130px;left:50%;transform:translateX(-50%);z-index:1300;background:#fff;border-radius:18px;box-shadow:0 10px 40px rgba(0,0,0,.22);padding:18px 22px;width:340px;max-height:78vh;overflow-y:auto;border:1.5px solid #E5E7EB;}
+.mf-multi-title{font-size:.86rem;font-weight:700;color:#111827;margin-bottom:6px;}
+.mf-multi-summary{font-size:.74rem;color:#6B7280;margin-bottom:14px;padding:8px 10px;background:#F9FAFB;border-radius:8px;line-height:1.45;border:1px solid #F3F4F6;}
+.mf-multi-section{margin-bottom:13px;}
+.mf-multi-label{font-size:.76rem;font-weight:700;color:#374151;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;}
+.mf-multi-label-pick{font-size:.7rem;font-weight:600;color:#15803D;}
+.mf-multi-btns{display:flex;gap:6px;flex-wrap:wrap;}
+.mf-multi-btn{flex:1 1 calc(33% - 6px);min-width:60px;padding:7px 6px;border-radius:9px;border:1.5px solid #E5E7EB;background:#F9FAFB;font-size:.78rem;font-weight:700;color:#374151;cursor:pointer;text-align:center;transition:all .12s;font-family:inherit;}
+.mf-multi-btn:hover{background:#ECFDF5;border-color:#22C55E;color:#15803D;}
+.mf-multi-btn.picked{background:#22C55E !important;border-color:#22C55E !important;color:#fff !important;}
+.mf-multi-btn.star{font-size:.95rem;color:#F59E0B;letter-spacing:1px;}
+.mf-multi-btn.star.picked{color:#fff;}
+.mf-multi-btn.other{background:#FEF3C7;border-color:#FCD34D;color:#92400E;}
+.mf-multi-input{width:100%;box-sizing:border-box;padding:7px 10px;border-radius:8px;border:1.5px solid #D1D5DB;font-size:.8rem;font-family:inherit;outline:none;}
+.mf-multi-input:focus{border-color:#22C55E;}
+.mf-multi-date{margin-top:6px;}
+.mf-multi-date input{width:100%;box-sizing:border-box;padding:6px 8px;border-radius:8px;border:1.5px solid #D1D5DB;font-size:.78rem;font-family:inherit;outline:none;}
+.mf-multi-date input:focus{border-color:#22C55E;}
+.mf-multi-acts{display:flex;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid #E5E7EB;}
+.mf-multi-cancel{flex:0 0 auto;padding:9px 14px;border-radius:9px;border:1.5px solid #D1D5DB;background:#F9FAFB;color:#6B7280;font-size:.78rem;font-weight:700;cursor:pointer;font-family:inherit;}
+.mf-multi-confirm{flex:1;padding:9px 0;border-radius:9px;border:none;background:#22C55E;color:#fff;font-size:.82rem;font-weight:700;cursor:pointer;font-family:inherit;transition:background .15s;}
+.mf-multi-confirm:hover:not(:disabled){background:#15803D;}
+.mf-multi-confirm:disabled{background:#D1D5DB;cursor:not-allowed;}
 /* ── Voice Float (bottom center) ── */
 @keyframes vfPulse{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.45),0 4px 20px rgba(239,68,68,.35)}70%{box-shadow:0 0 0 18px rgba(239,68,68,0),0 4px 20px rgba(239,68,68,.3)}}
 @keyframes vfIdle{0%,100%{box-shadow:0 4px 22px rgba(21,128,61,.45)}50%{box-shadow:0 4px 30px rgba(21,128,61,.75)}}
@@ -1328,31 +1352,81 @@ function matchProjectFromVoice(transcript){
 const VOICE_MATCHERS={assignee:matchAssigneeFromVoice,deadline:matchDeadlineFromVoice,star:matchStarFromVoice,project:matchProjectFromVoice};
 
 /* ── Generic Missing-Field Picker component ── */
-function MissingFieldPicker({field,prompt,task,options,onPick,allowDateInput,allowOther}){
-  const [customDate,setCustomDate]=useState('');
-  const taskHint=task?(`「${task.title||'（未命名）'}」→ ${task.assignee||'待定'}`):'';
+/* MultiFieldPicker — one popup, all missing fields filled in one go.
+   Pure render: parent owns `draft` state and passes onUpdate/onConfirm/onCancel. */
+function MultiFieldPicker({task,missing,draft,onUpdate,onConfirm,onCancel}){
+  const merged={...task,...draft};
+  const allFilled=missing.every(f=>{
+    const v=merged[f];
+    return v!=null && (typeof v!=='string' || v.trim());
+  });
+  const _starShow=merged.star?'★'.repeat(merged.star):'?';
+  const summary=`「${merged.title||'（未命名）'}」→ ${merged.assignee||'?'} · ${merged.deadline||'?'} · ${_starShow} · ${merged.project||'?'}`;
+  const dateInputValue=merged.deadline && /^\d{4}-\d{2}-\d{2}$/.test(merged.deadline) ? merged.deadline : '';
   return (
-    <div className="mf-picker">
-      <div className="mf-picker-title">{prompt}</div>
-      {taskHint && <div className="mf-picker-task">{taskHint}</div>}
-      <div className="mf-picker-btns">
-        {options.map(opt=>(
-          <button key={String(opt.value)}
-                  className={'mf-picker-btn'+(field==='star'?' star':'')}
-                  onClick={()=>onPick(opt.value)}>
-            {opt.label}
-          </button>
-        ))}
-        {allowOther && (
-          <button className="mf-picker-btn other" onClick={()=>onPick('其他')}>📁 其他</button>
-        )}
-      </div>
-      {allowDateInput && (
-        <div className="mf-picker-date">
-          <input type="date" value={customDate} onChange={e=>setCustomDate(e.target.value)} />
-          <button onClick={()=>customDate&&onPick(customDate)}>确定</button>
+    <div className="mf-multi">
+      <div className="mf-multi-title">📝 任务还差几项，补一下</div>
+      <div className="mf-multi-summary">{summary}</div>
+
+      {missing.includes('title') && (
+        <div className="mf-multi-section">
+          <div className="mf-multi-label"><span>📌 任务名</span>{merged.title && <span className="mf-multi-label-pick">✓ {merged.title}</span>}</div>
+          <input className="mf-multi-input" value={merged.title||''} onChange={e=>onUpdate('title',e.target.value)} placeholder="输入任务名" />
         </div>
       )}
+
+      {missing.includes('assignee') && (
+        <div className="mf-multi-section">
+          <div className="mf-multi-label"><span>👤 负责人</span>{merged.assignee && <span className="mf-multi-label-pick">✓ {merged.assignee}</span>}</div>
+          <div className="mf-multi-btns">
+            {assigneeOptions().map(o=>(
+              <button key={String(o.value)} className={'mf-multi-btn'+(merged.assignee===o.value?' picked':'')} onClick={()=>onUpdate('assignee',o.value)}>{o.label}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {missing.includes('deadline') && (
+        <div className="mf-multi-section">
+          <div className="mf-multi-label"><span>📅 截止时间</span>{merged.deadline && <span className="mf-multi-label-pick">✓ {merged.deadline}</span>}</div>
+          <div className="mf-multi-btns">
+            {deadlineQuickOptions().map(o=>(
+              <button key={String(o.value)} className={'mf-multi-btn'+(merged.deadline===o.value?' picked':'')} onClick={()=>onUpdate('deadline',o.value)}>{o.label}</button>
+            ))}
+          </div>
+          <div className="mf-multi-date">
+            <input type="date" value={dateInputValue} onChange={e=>e.target.value && onUpdate('deadline',e.target.value)} />
+          </div>
+        </div>
+      )}
+
+      {missing.includes('star') && (
+        <div className="mf-multi-section">
+          <div className="mf-multi-label"><span>⭐ 重要等级</span>{merged.star && <span className="mf-multi-label-pick">✓ {merged.star} 星</span>}</div>
+          <div className="mf-multi-btns">
+            {starOptions().map(o=>(
+              <button key={String(o.value)} className={'mf-multi-btn star'+(merged.star===o.value?' picked':'')} onClick={()=>onUpdate('star',o.value)}>{o.label}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {missing.includes('project') && (
+        <div className="mf-multi-section">
+          <div className="mf-multi-label"><span>📁 项目归属</span>{merged.project && <span className="mf-multi-label-pick">✓ {merged.project}</span>}</div>
+          <div className="mf-multi-btns">
+            {projectOptions().map(o=>(
+              <button key={String(o.value)} className={'mf-multi-btn'+(merged.project===o.value?' picked':'')} onClick={()=>onUpdate('project',o.value)}>{o.label}</button>
+            ))}
+            <button className={'mf-multi-btn other'+(merged.project==='其他'?' picked':'')} onClick={()=>onUpdate('project','其他')}>📁 其他</button>
+          </div>
+        </div>
+      )}
+
+      <div className="mf-multi-acts">
+        <button className="mf-multi-cancel" onClick={onCancel}>取消</button>
+        <button className="mf-multi-confirm" disabled={!allFilled} onClick={()=>onConfirm(merged)}>{allFilled?'✓ 派单':'请把缺项补完'}</button>
+      </div>
     </div>
   );
 }
@@ -1370,112 +1444,99 @@ function VoiceFloat({tasks}){
   const gotResultRef=useRef(false); // 防止onend覆盖onresult
   const pickerListenRef=useRef(false); // 是否在等待语音选项目
 
-  const FIELD_ORDER=['title','assignee','deadline','star','project'];
-  const askingRef=useRef(null); // {field, resolve}
+  // Multi-field popup state — one combined picker for all missing fields
+  const [draft,setDraft]=useState({});
+  const draftRef=useRef({});
+  const multiResolveRef=useRef(null);
 
-  // Build picker config for current field
-  const pickerConfigFor=(field)=>{
-    if(field==='assignee') return {options:assigneeOptions(),allowDateInput:false,allowOther:false};
-    if(field==='deadline') return {options:deadlineQuickOptions(),allowDateInput:true,allowOther:false};
-    if(field==='star') return {options:starOptions(),allowDateInput:false,allowOther:false};
-    if(field==='project') return {options:projectOptions(),allowDateInput:false,allowOther:true};
-    return {options:[],allowDateInput:false,allowOther:false}; // title: voice/text only
+  const updateDraft=(field,value)=>{
+    setDraft(prev=>{const next={...prev,[field]:value};draftRef.current=next;return next;});
   };
 
-  // Ask bridge for the natural-language prompt for this field
-  const fetchPrompt=async(task,missing)=>{
-    try{
-      const r=await fetch(`${BRIDGE_URL}/api/ai/ask-missing`,{
-        method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({task,missing})
-      });
-      const d=await r.json();
-      return (d.ok && d.prompt) ? d.prompt : `还缺${missing[0]}，补一下？`;
-    }catch(_){
-      return `还缺${missing[0]}，补一下？`;
+  // Required slots for dispatch. star uses priority as legacy fallback.
+  const computeMissingFields=(task)=>{
+    const out=[];
+    for(const f of ['title','assignee','deadline','star']){
+      const v=f==='star'?(task.star??task.priority):task[f];
+      if(v==null || (typeof v==='string' && !v.trim())) out.push(f);
     }
+    if(!task.project) out.push('project'); // always confirm project
+    return out;
   };
 
-  // Show picker + TTS prompt + listen for matching voice; resolve when picked
-  const showPickerAndListen=(task,field)=>new Promise(resolve=>{
-    setPendingTask({parsed:task,askField:field});
-    pendingTaskRef.current={parsed:task,askField:field};
-    askingRef.current={field,resolve};
-    // The actual TTS+SR is started by the caller (fillMissing), not here, so we
-    // can sequence "speak prompt → then listen → then resolve on click OR voice match"
-  });
-
-  // Receive a value (from picker click or voice match) and resolve current ask
-  const resolveAsk=(value)=>{
-    const a=askingRef.current;
-    if(!a) return;
-    askingRef.current=null;
-    a.resolve(value);
-  };
-
-  // The main chain: walk FIELD_ORDER, fill each missing field
-  const fillMissing=async(task)=>{
+  // Show MultiFieldPicker; resolves with merged task (or null on cancel).
+  const fillMissing=(task)=>{
     let cur={...task};
-    // Map LLM "priority" key to "star" if present
     if(cur.star==null && cur.priority!=null) cur.star=cur.priority;
-    for(const field of FIELD_ORDER){
-      const v=field==='star'?(cur.star??cur.priority):cur[field];
-      if(v!=null && (typeof v!=='string' || v.trim())) continue;
-
-      // Get a prompt from the bridge (fallback baked in)
-      const prompt=await fetchPrompt(cur,[field]);
-
-      // Speak the prompt; when TTS ends, start voice listening for this field's matcher
+    const missing=computeMissingFields(cur);
+    if(missing.length===0) return Promise.resolve(cur);
+    setDraft({});draftRef.current={};
+    return new Promise(resolve=>{
+      multiResolveRef.current=resolve;
+      setPendingTask({parsed:cur,missing});
+      pendingTaskRef.current={parsed:cur,missing};
+      // brief intro + single voice attempt to fill what we can
+      const intro='还差几项，按界面补，也可以一句话说出来。';
       setPhase('talking');setStatus('奇点提问中...');startBars();
       beepFn(1047,.05,0);beepFn(1319,.06,.1);
-      await makeTTS(prompt);
-      stopBars();
-
-      // Show picker UI and start voice listener; resolve via either path
-      const value=await new Promise(resolve=>{
-        askingRef.current={field,resolve};
-        setPendingTask({parsed:cur,askField:field,prompt});
-        pendingTaskRef.current={parsed:cur,askField:field,prompt};
-        startFieldVoiceListen(field);
-      });
-
-      // Cleanup picker + apply value
-      setPendingTask(null);pendingTaskRef.current=null;
-      cur[field]=value;
-      if(field==='star') cur.priority=value; // keep legacy key in sync for downstream code
-    }
-    return cur;
+      makeTTS(intro).then(()=>{stopBars();startMultiVoiceListen(missing);});
+    });
   };
 
-  // Voice listener for a single missing-field round
-  const startFieldVoiceListen=(field)=>{
+  const onMultiConfirm=(merged)=>{
+    if(merged.star!=null && merged.priority==null) merged.priority=merged.star;
+    const r=multiResolveRef.current;
+    multiResolveRef.current=null;
+    setPendingTask(null);pendingTaskRef.current=null;
+    setDraft({});draftRef.current={};
+    if(r) r(merged);
+  };
+
+  const onMultiCancel=()=>{
+    const r=multiResolveRef.current;
+    multiResolveRef.current=null;
+    setPendingTask(null);pendingTaskRef.current=null;
+    setDraft({});draftRef.current={};
+    if(r) r(null);
+  };
+
+  // One SR session after popup opens — try to fill ANY matchable field from a single utterance
+  const startMultiVoiceListen=(missing)=>{
     const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-    if(!SR) return; // no voice; user must click
+    if(!SR) return;
     pickerListenRef.current=true;
     const r=new SR();
     r.lang='zh-CN';r.continuous=false;r.interimResults=false;r.maxAlternatives=3;
     recogRef.current=r;
-    setPhase('rec');setStatus('请回答...');startBars();
+    setPhase('rec');setStatus('一句话补完，或者点按钮');startBars();
     r.onresult=ev=>{
-      pickerListenRef.current=false;stopBars();setPhase('proc');
-      const alts=Array.from(ev.results[0]).map(a=>a.transcript);
-      const transcript=alts.join(' ');
-      let value=null;
-      if(field==='title'){
-        value=transcript.trim()||null;
-      }else{
-        const m=VOICE_MATCHERS[field];
-        if(m) value=m(transcript);
+      pickerListenRef.current=false;stopBars();setPhase('idle');
+      const transcript=Array.from(ev.results[0]).map(a=>a.transcript).join(' ');
+      const cur=pendingTaskRef.current?.parsed||{};
+      const updates={};
+      for(const f of missing){
+        const already=draftRef.current[f]??(f==='star'?(cur.star??cur.priority):cur[f]);
+        if(already!=null && (typeof already!=='string' || already.trim())) continue;
+        if(f==='title'){
+          const t=transcript.trim();
+          if(t) updates.title=t;
+        }else{
+          const m=VOICE_MATCHERS[f];
+          if(m){
+            const v=m(transcript);
+            if(v!=null) updates[f]=v;
+          }
+        }
       }
-      if(value!=null){
-        resolveAsk(value);
+      if(Object.keys(updates).length){
+        setDraft(prev=>{const next={...prev,...updates};draftRef.current=next;return next;});
+        setStatus('已识别 '+Object.keys(updates).length+' 项，确认或继续补');
       }else{
-        // Voice didn't match — leave picker visible, user must click
-        setPhase('idle');setStatus('听不太清，点按钮选一下');
+        setStatus('没听清，点按钮补');
       }
     };
-    r.onerror=()=>{pickerListenRef.current=false;stopBars();setPhase('idle');setStatus('点按钮选一下');};
-    r.onend=()=>{if(pickerListenRef.current){pickerListenRef.current=false;stopBars();}};
+    r.onerror=()=>{pickerListenRef.current=false;stopBars();setPhase('idle');};
+    r.onend=()=>{if(pickerListenRef.current){pickerListenRef.current=false;stopBars();setPhase('idle');}};
     r.start();
   };
 
@@ -1617,7 +1678,12 @@ function VoiceFloat({tasks}){
             stopBars();
             try{
               const filled=await fillMissing(task);
-              await confirmAndDispatch(filled);
+              if(filled){
+                await confirmAndDispatch(filled);
+              }else{
+                setPhase('idle');setStatus('已取消');
+                setTimeout(()=>setStatus('点击说话 · 可下达任务'),2000);
+              }
             }catch(e){console.error('[fillMissing]',e);onErr();}
           }).catch(onErr);
         } else {
@@ -1728,14 +1794,14 @@ function VoiceFloat({tasks}){
 
   return(
     <div className="vf-wrap">
-      {pendingTask && pendingTask.askField==='project' && (
-        <MissingFieldPicker
-          field="project"
-          prompt="📋 归哪个项目？"
+      {pendingTask && pendingTask.missing && (
+        <MultiFieldPicker
           task={pendingTask.parsed}
-          options={projectOptions()}
-          allowOther={true}
-          onPick={(value)=>resolveAsk(value)}
+          missing={pendingTask.missing}
+          draft={draft}
+          onUpdate={updateDraft}
+          onConfirm={onMultiConfirm}
+          onCancel={onMultiCancel}
         />
       )}
       <div className={statusClass}>{status}</div>
