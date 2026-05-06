@@ -376,10 +376,13 @@ body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;backgr
 /* ── Multi-field combined picker (one popup, all missing fields) ── */
 .mf-multi{position:fixed;bottom:130px;left:50%;transform:translateX(-50%);z-index:1300;background:#fff;border-radius:18px;box-shadow:0 10px 40px rgba(0,0,0,.22);padding:18px 22px;width:340px;max-height:78vh;overflow-y:auto;border:1.5px solid #E5E7EB;}
 .mf-multi-title{font-size:.86rem;font-weight:700;color:#111827;margin-bottom:6px;}
-.mf-multi-summary{font-size:.74rem;color:#6B7280;margin-bottom:14px;padding:8px 10px;background:#F9FAFB;border-radius:8px;line-height:1.45;border:1px solid #F3F4F6;}
+.mf-multi-summary{margin-bottom:14px;padding:10px 12px;background:#F9FAFB;border-radius:8px;border:1px solid #F3F4F6;display:grid;grid-template-columns:auto 1fr;gap:5px 12px;font-size:.74rem;line-height:1.35;}
+.mf-multi-summary-key{color:#9CA3AF;font-weight:600;white-space:nowrap;}
+.mf-multi-summary-val{color:#111827;font-weight:600;word-break:break-all;overflow-wrap:anywhere;min-width:0;}
+.mf-multi-summary-val.empty{color:#D1D5DB;font-weight:500;}
 .mf-multi-section{margin-bottom:13px;}
-.mf-multi-label{font-size:.76rem;font-weight:700;color:#374151;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;}
-.mf-multi-label-pick{font-size:.7rem;font-weight:600;color:#15803D;}
+.mf-multi-label{font-size:.76rem;font-weight:700;color:#374151;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;}
+.mf-multi-label-pick{font-size:.85rem;color:#22C55E;font-weight:700;flex:0 0 auto;}
 .mf-multi-btns{display:flex;gap:6px;flex-wrap:wrap;}
 .mf-multi-btn{flex:1 1 calc(33% - 6px);min-width:60px;padding:7px 6px;border-radius:9px;border:1.5px solid #E5E7EB;background:#F9FAFB;font-size:.78rem;font-weight:700;color:#374151;cursor:pointer;text-align:center;transition:all .12s;font-family:inherit;}
 .mf-multi-btn:hover{background:#ECFDF5;border-color:#22C55E;color:#15803D;}
@@ -1360,24 +1363,35 @@ function MultiFieldPicker({task,missing,draft,onUpdate,onConfirm,onCancel}){
     const v=merged[f];
     return v!=null && (typeof v!=='string' || v.trim());
   });
-  const _starShow=merged.star?'★'.repeat(merged.star):'?';
-  const summary=`「${merged.title||'（未命名）'}」→ ${merged.assignee||'?'} · ${merged.deadline||'?'} · ${_starShow} · ${merged.project||'?'}`;
   const dateInputValue=merged.deadline && /^\d{4}-\d{2}-\d{2}$/.test(merged.deadline) ? merged.deadline : '';
+  const _row=(key,val)=>(
+    <React.Fragment>
+      <div className="mf-multi-summary-key">{key}</div>
+      <div className={'mf-multi-summary-val'+(val?'':' empty')}>{val||'未填'}</div>
+    </React.Fragment>
+  );
+  const _check=(picked)=>picked && <span className="mf-multi-label-pick">✓</span>;
   return (
     <div className="mf-multi">
-      <div className="mf-multi-title">📝 任务还差几项，补一下</div>
-      <div className="mf-multi-summary">{summary}</div>
+      <div className="mf-multi-title">📝 任务确认 · 缺项请补</div>
+      <div className="mf-multi-summary">
+        {_row('📌 任务',merged.title)}
+        {_row('👤 负责',merged.assignee)}
+        {_row('📅 截止',merged.deadline)}
+        {_row('⭐ 等级',merged.star?'★'.repeat(merged.star)+' ('+merged.star+'星)':'')}
+        {_row('📁 项目',merged.project)}
+      </div>
 
       {missing.includes('title') && (
         <div className="mf-multi-section">
-          <div className="mf-multi-label"><span>📌 任务名</span>{merged.title && <span className="mf-multi-label-pick">✓ {merged.title}</span>}</div>
+          <div className="mf-multi-label"><span>📌 任务名</span>{_check(merged.title)}</div>
           <input className="mf-multi-input" value={merged.title||''} onChange={e=>onUpdate('title',e.target.value)} placeholder="输入任务名" />
         </div>
       )}
 
       {missing.includes('assignee') && (
         <div className="mf-multi-section">
-          <div className="mf-multi-label"><span>👤 负责人</span>{merged.assignee && <span className="mf-multi-label-pick">✓ {merged.assignee}</span>}</div>
+          <div className="mf-multi-label"><span>👤 负责人</span>{_check(merged.assignee)}</div>
           <div className="mf-multi-btns">
             {assigneeOptions().map(o=>(
               <button key={String(o.value)} className={'mf-multi-btn'+(merged.assignee===o.value?' picked':'')} onClick={()=>onUpdate('assignee',o.value)}>{o.label}</button>
@@ -1388,7 +1402,7 @@ function MultiFieldPicker({task,missing,draft,onUpdate,onConfirm,onCancel}){
 
       {missing.includes('deadline') && (
         <div className="mf-multi-section">
-          <div className="mf-multi-label"><span>📅 截止时间</span>{merged.deadline && <span className="mf-multi-label-pick">✓ {merged.deadline}</span>}</div>
+          <div className="mf-multi-label"><span>📅 截止时间</span>{_check(merged.deadline)}</div>
           <div className="mf-multi-btns">
             {deadlineQuickOptions().map(o=>(
               <button key={String(o.value)} className={'mf-multi-btn'+(merged.deadline===o.value?' picked':'')} onClick={()=>onUpdate('deadline',o.value)}>{o.label}</button>
@@ -1402,7 +1416,7 @@ function MultiFieldPicker({task,missing,draft,onUpdate,onConfirm,onCancel}){
 
       {missing.includes('star') && (
         <div className="mf-multi-section">
-          <div className="mf-multi-label"><span>⭐ 重要等级</span>{merged.star && <span className="mf-multi-label-pick">✓ {merged.star} 星</span>}</div>
+          <div className="mf-multi-label"><span>⭐ 重要等级</span>{_check(merged.star)}</div>
           <div className="mf-multi-btns">
             {starOptions().map(o=>(
               <button key={String(o.value)} className={'mf-multi-btn star'+(merged.star===o.value?' picked':'')} onClick={()=>onUpdate('star',o.value)}>{o.label}</button>
@@ -1413,7 +1427,7 @@ function MultiFieldPicker({task,missing,draft,onUpdate,onConfirm,onCancel}){
 
       {missing.includes('project') && (
         <div className="mf-multi-section">
-          <div className="mf-multi-label"><span>📁 项目归属</span>{merged.project && <span className="mf-multi-label-pick">✓ {merged.project}</span>}</div>
+          <div className="mf-multi-label"><span>📁 项目归属</span>{_check(merged.project)}</div>
           <div className="mf-multi-btns">
             {projectOptions().map(o=>(
               <button key={String(o.value)} className={'mf-multi-btn'+(merged.project===o.value?' picked':'')} onClick={()=>onUpdate('project',o.value)}>{o.label}</button>
@@ -1468,10 +1482,11 @@ function VoiceFloat({tasks}){
     return out;
   };
 
-  // LLM-extracted priority (high/mid/low string) → star (1-5 int) for the picker pre-fill.
-  // High priority maps to 4 (not 5) so boss has to actively click ★★★★★ for "actually urgent".
+  // Bridge LLM now returns `star` (1-5 int) directly — no display-time mapping needed.
+  // PRIORITY_TO_STAR kept as a fallback for old-bridge responses (priority high/mid/low).
   const PRIORITY_TO_STAR={high:4,mid:3,low:2};
-  // Star (1-5 int) → priority (low/mid/high string) for boss_tasks/tasks/frontend-actions write.
+  // Star (1-5 int) → priority (low/mid/high string) for boss_tasks/tasks/frontend-actions
+  // write. Lossy 5→3 projection is unavoidable until those columns become integer.
   const STAR_TO_PRIORITY={1:'low',2:'low',3:'mid',4:'high',5:'high'};
 
   // Show MultiFieldPicker; resolves with merged task (or null on cancel).
@@ -1479,10 +1494,14 @@ function VoiceFloat({tasks}){
     let cur={...task};
     const missing=computeMissingFields(cur);
     if(missing.length===0) return Promise.resolve(cur);
-    // Pre-fill draft.star from LLM-extracted priority so the popup shows a sensible
-    // default selected, but boss can still change it before派单.
+    // Pre-fill draft.star from AI's pick. Prefer task.star (new bridge: LLM returns 1-5
+    // directly); fall back to PRIORITY_TO_STAR[task.priority] for old-bridge compat.
     const initialDraft={};
-    if(cur.priority && PRIORITY_TO_STAR[cur.priority]!=null) initialDraft.star=PRIORITY_TO_STAR[cur.priority];
+    if(typeof cur.star==='number' && cur.star>=1 && cur.star<=5){
+      initialDraft.star=cur.star;
+    }else if(cur.priority && PRIORITY_TO_STAR[cur.priority]!=null){
+      initialDraft.star=PRIORITY_TO_STAR[cur.priority];
+    }
     setDraft(initialDraft);draftRef.current={...initialDraft};
     return new Promise(resolve=>{
       multiResolveRef.current=resolve;
