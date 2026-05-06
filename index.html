@@ -1479,11 +1479,24 @@ function VoiceFloat({tasks}){
       const intro='还差几项，按界面补，也可以一句话说出来。';
       setPhase('talking');setStatus('奇点提问中...');startBars();
       beepFn(1047,.05,0);beepFn(1319,.06,.1);
-      makeTTS(intro).then(()=>{stopBars();startMultiVoiceListen(missing);});
+      makeTTS(intro).then(()=>{
+        stopBars();
+        // If popup was already closed (boss clicked 派单 / 取消 mid-TTS), don't start SR
+        if(pendingTaskRef.current) startMultiVoiceListen(missing);
+      });
     });
   };
 
+  // Stop any active SR + cancel any in-flight TTS so the next stage (派单 / 已取消)
+  // doesn't end up talking to a still-listening mic.
+  const _silencePopupVoice=()=>{
+    pickerListenRef.current=false;
+    try{recogRef.current?.stop?.();}catch(_){}
+    try{window.speechSynthesis.cancel();}catch(_){}
+  };
+
   const onMultiConfirm=(merged)=>{
+    _silencePopupVoice();
     if(merged.star!=null && merged.priority==null) merged.priority=merged.star;
     const r=multiResolveRef.current;
     multiResolveRef.current=null;
@@ -1493,6 +1506,7 @@ function VoiceFloat({tasks}){
   };
 
   const onMultiCancel=()=>{
+    _silencePopupVoice();
     const r=multiResolveRef.current;
     multiResolveRef.current=null;
     setPendingTask(null);pendingTaskRef.current=null;
@@ -1504,6 +1518,9 @@ function VoiceFloat({tasks}){
   const startMultiVoiceListen=(missing)=>{
     const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
     if(!SR) return;
+    if(!pendingTaskRef.current) return; // popup already gone — don't start a stray SR
+    // defensive: ensure no TTS is mid-playback when SR opens
+    try{window.speechSynthesis.cancel();}catch(_){}
     pickerListenRef.current=true;
     const r=new SR();
     r.lang='zh-CN';r.continuous=false;r.interimResults=false;r.maxAlternatives=3;
@@ -1511,6 +1528,7 @@ function VoiceFloat({tasks}){
     setPhase('rec');setStatus('一句话补完，或者点按钮');startBars();
     r.onresult=ev=>{
       pickerListenRef.current=false;stopBars();setPhase('idle');
+      if(!pendingTaskRef.current) return; // popup closed mid-recognition — drop the result
       const transcript=Array.from(ev.results[0]).map(a=>a.transcript).join(' ');
       const cur=pendingTaskRef.current?.parsed||{};
       const updates={};
