@@ -1494,7 +1494,7 @@ function VoiceFloat({tasks}){
         if(isTaskIntent(transcript)){
           parseTaskAI(transcript).then(async task=>{
             stopBars();
-            const pt={parsed:task};
+            const pt={parsed:task,askField:'project'};
             pendingTaskRef.current=pt;
             setPendingTask(pt);
             const projList=PROJECTS.join('、');
@@ -1639,17 +1639,15 @@ function VoiceFloat({tasks}){
 
   return(
     <div className="vf-wrap">
-      {pendingTask&&(
-        <div className="proj-picker">
-          <div className="proj-picker-title">📋 任务已识别，选择所属项目：</div>
-          <div className="proj-picker-task">「{pendingTask.parsed.title||'（未命名）'}」→ {pendingTask.parsed.assignee||'待定'}</div>
-          <div className="proj-picker-btns">
-            {PROJECTS.map(function(p){return(
-              <button key={p} className="proj-picker-btn" onClick={function(){confirmProject(p);}}>{p}</button>
-            );})}
-            <button className="proj-picker-btn other" onClick={function(){confirmProject('其他');}}>📁 其他</button>
-          </div>
-        </div>
+      {pendingTask && pendingTask.askField==='project' && (
+        <MissingFieldPicker
+          field="project"
+          prompt="📋 归哪个项目？"
+          task={pendingTask.parsed}
+          options={projectOptions()}
+          allowOther={true}
+          onPick={confirmProject}
+        />
       )}
       <div className={statusClass}>{status}</div>
       <button className={btnClass} onClick={handleClick}>
