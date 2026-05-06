@@ -1296,16 +1296,35 @@ function Avatar({tasks, large}){
 /* ── Missing-field picker helpers ── */
 const _pad2=n=>String(n).padStart(2,'0');
 const _isoDate=d=>`${d.getFullYear()}-${_pad2(d.getMonth()+1)}-${_pad2(d.getDate())}`;
+// Storage format: "YYYY-MM-DD HH:MM" — Postgres timestamptz happy, human readable, no tz ambiguity inside one app.
+const _isoDateTime=d=>`${_isoDate(d)} ${_pad2(d.getHours())}:${_pad2(d.getMinutes())}`;
+// datetime-local input value format (T-separated, no seconds)
+const _toLocalInputValue=d=>`${_isoDate(d)}T${_pad2(d.getHours())}:${_pad2(d.getMinutes())}`;
+// Friendly display: parses both "YYYY-MM-DD HH:MM" and ISO; falls back to raw string
+function _formatDeadline(s){
+  if(!s) return '';
+  const d=new Date(s.includes('T')?s:s.replace(' ','T'));
+  if(isNaN(d)) return s;
+  return _isoDateTime(d);
+}
+// Normalize date-only string ("2026-05-12") to date+time string ("2026-05-12 18:00") — default EOD
+function _normalizeDeadline(s){
+  if(!s) return s;
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s+' 18:00';
+  return s;
+}
 function deadlineQuickOptions(){
   const t=new Date();
-  const tomorrow=new Date(t); tomorrow.setDate(t.getDate()+1);
-  const eow=new Date(t); eow.setDate(t.getDate()+(7-t.getDay()||7)); // Sunday
-  const eonw=new Date(eow); eonw.setDate(eow.getDate()+7);
+  const setEOD=d=>{d.setHours(18,0,0,0);return d;};
+  const today=setEOD(new Date(t));
+  const tomorrow=new Date(t); tomorrow.setDate(t.getDate()+1); setEOD(tomorrow);
+  const eow=new Date(t); eow.setDate(t.getDate()+(7-t.getDay()||7)); setEOD(eow);
+  const eonw=new Date(eow); eonw.setDate(eow.getDate()+7); setEOD(eonw);
   return [
-    {value:_isoDate(t),label:'今天'},
-    {value:_isoDate(tomorrow),label:'明天'},
-    {value:_isoDate(eow),label:'本周'},
-    {value:_isoDate(eonw),label:'下周'},
+    {value:_isoDateTime(today),    label:'今天18:00'},
+    {value:_isoDateTime(tomorrow), label:'明天18:00'},
+    {value:_isoDateTime(eow),      label:'本周末18:00'},
+    {value:_isoDateTime(eonw),     label:'下周末18:00'},
   ];
 }
 function assigneeOptions(){
@@ -1323,17 +1342,44 @@ function matchAssigneeFromVoice(transcript){
   }
   return null;
 }
+// Try to extract HH:MM from transcript; return [HH, MM] or null
+function _parseTimeFromVoice(t){
+  // "下午5点" / "下午5点半" / "下午5点30分" / "晚上8点"
+  let mm=t.match(/(早上|上午|中午|下午|晚上|傍晚)?\s*(\d{1,2})\s*点(半|\s*(\d{1,2})\s*分?)?/);
+  if(mm){
+    let h=parseInt(mm[2]);
+    const period=mm[1]||'';
+    if(/下午|晚上|傍晚/.test(period) && h<12) h+=12;
+    if(/中午/.test(period) && h<12) h+=12;
+    let m=0;
+    if(mm[3]==='半') m=30;
+    else if(mm[4]) m=parseInt(mm[4]);
+    return [h,m];
+  }
+  // explicit "18:00" / "18点00分"
+  mm=t.match(/(\d{1,2}):(\d{2})/);
+  if(mm) return [parseInt(mm[1]),parseInt(mm[2])];
+  return null;
+}
 function matchDeadlineFromVoice(transcript){
   const t=transcript;
   const opts=deadlineQuickOptions();
-  if(/今天|今儿/.test(t)) return opts[0].value;
-  if(/明天|明儿/.test(t)) return opts[1].value;
-  if(/本周|这周|这礼拜|周末/.test(t)) return opts[2].value;
-  if(/下周|下礼拜/.test(t)) return opts[3].value;
-  // YYYY-MM-DD
-  const m=t.match(/(\d{4})[-年/](\d{1,2})[-月/](\d{1,2})/);
-  if(m) return `${m[1]}-${_pad2(m[2])}-${_pad2(m[3])}`;
-  return null;
+  // Pick a base date from the day-of-week phrase, then layer time on top
+  let baseDate=null;
+  if(/今天|今儿/.test(t)) baseDate=new Date();
+  else if(/明天|明儿/.test(t)){baseDate=new Date(); baseDate.setDate(baseDate.getDate()+1);}
+  else if(/本周|这周|这礼拜|周末/.test(t)){baseDate=new Date(); baseDate.setDate(baseDate.getDate()+(7-baseDate.getDay()||7));}
+  else if(/下周|下礼拜/.test(t)){baseDate=new Date(); baseDate.setDate(baseDate.getDate()+(7-baseDate.getDay()||7)+7);}
+  else {
+    // explicit YYYY-MM-DD or M月D日
+    const m=t.match(/(\d{4})[-年/](\d{1,2})[-月/](\d{1,2})/);
+    if(m){baseDate=new Date(parseInt(m[1]),parseInt(m[2])-1,parseInt(m[3]));}
+  }
+  if(!baseDate) return null;
+  const time=_parseTimeFromVoice(t);
+  if(time) baseDate.setHours(time[0],time[1],0,0);
+  else baseDate.setHours(18,0,0,0); // default EOD when day mentioned without time
+  return _isoDateTime(baseDate);
 }
 const _STAR_WORD={'一':1,'二':2,'两':2,'三':3,'四':4,'五':5};
 function matchStarFromVoice(transcript){
@@ -1363,7 +1409,12 @@ function MultiFieldPicker({task,missing,draft,onUpdate,onConfirm,onCancel}){
     const v=merged[f];
     return v!=null && (typeof v!=='string' || v.trim());
   });
-  const dateInputValue=merged.deadline && /^\d{4}-\d{2}-\d{2}$/.test(merged.deadline) ? merged.deadline : '';
+  // datetime-local input wants "YYYY-MM-DDTHH:mm"
+  const dateInputValue=(()=>{
+    if(!merged.deadline) return '';
+    const d=new Date(merged.deadline.includes('T')?merged.deadline:merged.deadline.replace(' ','T'));
+    return isNaN(d)?'':_toLocalInputValue(d);
+  })();
   const _row=(key,val)=>(
     <React.Fragment>
       <div className="mf-multi-summary-key">{key}</div>
@@ -1377,7 +1428,7 @@ function MultiFieldPicker({task,missing,draft,onUpdate,onConfirm,onCancel}){
       <div className="mf-multi-summary">
         {_row('📌 任务',merged.title)}
         {_row('👤 负责',merged.assignee)}
-        {_row('📅 截止',merged.deadline)}
+        {_row('📅 截止',_formatDeadline(merged.deadline))}
         {_row('⭐ 等级',merged.star?'★'.repeat(merged.star)+' ('+merged.star+'星)':'')}
         {_row('📁 项目',merged.project)}
       </div>
@@ -1409,7 +1460,11 @@ function MultiFieldPicker({task,missing,draft,onUpdate,onConfirm,onCancel}){
             ))}
           </div>
           <div className="mf-multi-date">
-            <input type="date" value={dateInputValue} onChange={e=>e.target.value && onUpdate('deadline',e.target.value)} />
+            <input type="datetime-local" value={dateInputValue} onChange={e=>{
+              if(!e.target.value) return;
+              // datetime-local gives "YYYY-MM-DDTHH:mm" — convert to "YYYY-MM-DD HH:MM" for storage
+              onUpdate('deadline',e.target.value.replace('T',' '));
+            }} />
           </div>
         </div>
       )}
@@ -1493,6 +1548,8 @@ function VoiceFloat({tasks}){
   // Show MultiFieldPicker; resolves with merged task (or null on cancel).
   const fillMissing=(task)=>{
     let cur={...task};
+    // LLM may return date-only ("2026-05-12"); pad to date+EOD so it's a valid timestamp.
+    if(typeof cur.deadline==='string') cur.deadline=_normalizeDeadline(cur.deadline);
     const missing=computeMissingFields(cur);
     if(missing.length===0) return Promise.resolve(cur);
     // Pre-fill draft.star from AI's pick. Prefer task.star (new bridge: LLM returns 1-5
@@ -1886,7 +1943,7 @@ function TaskForm({task,onSave,onClose}){
           <div className="form-grid">
             <div className="fg full"><label>任务名称 *</label><input type="text" placeholder="请输入任务名称" value={f.name} onChange={e=>set('name',e.target.value)} required/></div>
             <div className="fg"><label>负责人</label><input type="text" placeholder="负责人姓名" value={f.assignee} onChange={e=>set('assignee',e.target.value)}/></div>
-            <div className="fg"><label>截止日期</label><input type="date" value={f.deadline} onChange={e=>set('deadline',e.target.value)}/></div>
+            <div className="fg"><label>截止时间</label><input type="datetime-local" value={f.deadline?(f.deadline.includes('T')?f.deadline.slice(0,16):f.deadline.replace(' ','T').slice(0,16)):''} onChange={e=>set('deadline',e.target.value?e.target.value.replace('T',' '):'')}/></div>
             <div className="fg"><label>优先级</label>
               <select value={f.priority} onChange={e=>set('priority',e.target.value)}>
                 <option value="high">高优先级</option><option value="mid">中优先级</option><option value="low">低优先级</option>
@@ -3249,7 +3306,7 @@ function App(){
                         </td>
                         <td><span className="chip">{t.assignee||'—'}</span></td>
                         <td style={{whiteSpace:'nowrap',fontSize:'.82rem'}}>
-                          {t.deadline?new Date(t.deadline).toLocaleDateString('zh-CN'):'—'}
+                          {t.deadline?_formatDeadline(t.deadline):'—'}
                           {ov&&<span className="ov">逾期</span>}
                         </td>
                         <td><span className={P[t.priority]?.cls}>{P[t.priority]?.e} {P[t.priority]?.label}</span></td>
@@ -3278,7 +3335,7 @@ function App(){
                     </div>
                     <div style={{fontSize:'.78rem',color:'#6B7280',display:'flex',flexWrap:'wrap',gap:'6px 12px'}}>
                       <span>👤 {t.assignee||'—'}</span>
-                      {t.deadline&&<span>📅 {new Date(t.deadline).toLocaleDateString('zh-CN')}{ov&&<span className="ov">逾期</span>}</span>}
+                      {t.deadline&&<span>📅 {_formatDeadline(t.deadline)}{ov&&<span className="ov">逾期</span>}</span>}
                       <span className={P[t.priority]?.cls}>{P[t.priority]?.e} {P[t.priority]?.label}</span>
                     </div>
                     {t.status==='blocked'&&t.blocker&&<div className="task-block" style={{marginTop:5}}>▲ {t.blocker}</div>}
