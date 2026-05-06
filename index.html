@@ -653,10 +653,22 @@ const {useState,useEffect,useRef}=React;
 const BRIDGE_URL=(localStorage.getItem('QIDIAN_BRIDGE_URL')||window.QIDIAN_BRIDGE_URL||'https://35.79.2.111/qidian').replace(/\/$/,'');
 function getPT(name){const m=(window.__ptMap||{})[name];return m!=null?m:0;}
 
-/* ===== Supabase ===== */
-const SURL='https://nkkbvhtmlooverkhyqsa.supabase.co';
-const SKEY=['eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9','.eyJpc3MiOiJzdXBhYmFzZ','SIsInJlZiI6Im5ra2J2aH','RtbG9vdmVya2h5cXNhIiwi','cm9sZSI6ImFub24iLCJpYX','QiOjE3NzU2OTM1NTksImV4','cCI6MjA5MTI2OTU1OX0.7o','RpImggZHpvusrS6kJKWN6c','v12hYG4NqxUFCIZDCIs'].join('');
+/* ===== Supabase (toggle via localStorage.DASHBOARD_DB = 'prod' | 'test') ===== */
+const _DB_CFG={
+  prod:{
+    url:'https://nkkbvhtmlooverkhyqsa.supabase.co',
+    key:['eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9','.eyJpc3MiOiJzdXBhYmFzZ','SIsInJlZiI6Im5ra2J2aH','RtbG9vdmVya2h5cXNhIiwi','cm9sZSI6ImFub24iLCJpYX','QiOjE3NzU2OTM1NTksImV4','cCI6MjA5MTI2OTU1OX0.7o','RpImggZHpvusrS6kJKWN6c','v12hYG4NqxUFCIZDCIs'].join(''),
+  },
+  test:{
+    url:'https://lqyxvbhidkhaainruzuk.supabase.co',
+    key:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxxeXh2YmhpZGtoYWFpbnJ1enVrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3Mjc2MDMsImV4cCI6MjA5MzMwMzYwM30.phFXLNwx6KDC2-zzQZrTYStyTmy7YLNdJVmh03UyW8o',
+  },
+};
+const _DB_MODE=(localStorage.getItem('DASHBOARD_DB')||'prod').toLowerCase()==='test'?'test':'prod';
+const SURL=_DB_CFG[_DB_MODE].url;
+const SKEY=_DB_CFG[_DB_MODE].key;
 const SB=supabase.createClient(SURL,SKEY);
+console.log('[dashboard] DASHBOARD_DB='+_DB_MODE+' → '+SURL);
 const PROJECTS=['w','理享招生项目'];
 const FALLBACK_PROJECT_MEMBERS={
   'w':[],
