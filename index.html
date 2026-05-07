@@ -703,9 +703,8 @@ const _DB_CFG={
     key:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxxeXh2YmhpZGtoYWFpbnJ1enVrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3Mjc2MDMsImV4cCI6MjA5MzMwMzYwM30.phFXLNwx6KDC2-zzQZrTYStyTmy7YLNdJVmh03UyW8o',
   },
 };
-// 2026-05-07 cleanup: default to test DB while we shake out the bridge migration.
-// Override with localStorage.DASHBOARD_DB='prod' to use production.
-const _DB_MODE=(localStorage.getItem('DASHBOARD_DB')||'test').toLowerCase()==='prod'?'prod':'test';
+// Default to prod. Switch to test bed by setting localStorage.DASHBOARD_DB='test'.
+const _DB_MODE=(localStorage.getItem('DASHBOARD_DB')||'prod').toLowerCase()==='test'?'test':'prod';
 const SURL=_DB_CFG[_DB_MODE].url;
 const SKEY=_DB_CFG[_DB_MODE].key;
 const SB=supabase.createClient(SURL,SKEY);

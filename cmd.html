@@ -111,8 +111,8 @@ const BRIDGE_URL=(localStorage.getItem('QIDIAN_BRIDGE_URL')||window.QIDIAN_BRIDG
 
 // Stage D.2 — cmd.html reads/writes go through bridge HTTP. Direct SB client is
 // vestigial (no live SB.from() callsites left) but kept until a separate cleanup
-// pass since other modules may import it. 2026-05-07: default to test to match
-// index.html; override with localStorage.DASHBOARD_DB='prod'.
+// pass since other modules may import it. Default prod; opt-in test via
+// localStorage.DASHBOARD_DB='test'.
 const _DB_CFG={
   prod:{
     url:'https://nkkbvhtmlooverkhyqsa.supabase.co',
@@ -123,7 +123,7 @@ const _DB_CFG={
     key:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxxeXh2YmhpZGtoYWFpbnJ1enVrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3Mjc2MDMsImV4cCI6MjA5MzMwMzYwM30.phFXLNwx6KDC2-zzQZrTYStyTmy7YLNdJVmh03UyW8o',
   },
 };
-const _DB_MODE=(localStorage.getItem('DASHBOARD_DB')||'test').toLowerCase()==='prod'?'prod':'test';
+const _DB_MODE=(localStorage.getItem('DASHBOARD_DB')||'prod').toLowerCase()==='test'?'test':'prod';
 const SURL=_DB_CFG[_DB_MODE].url;
 const SKEY=_DB_CFG[_DB_MODE].key;
 const SB=supabase.createClient(SURL,SKEY);
