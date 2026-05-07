@@ -106,11 +106,25 @@ body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;
 const {useState,useEffect,useCallback}=React;
 const BRIDGE_URL=(localStorage.getItem('QIDIAN_BRIDGE_URL')||window.QIDIAN_BRIDGE_URL||'https://35.79.2.111/qidian').replace(/\/$/,'');
 
-// Stage D.2 — cmd.html reads/writes go through bridge HTTP. Supabase client kept only
-// as a fallback during transition; remove in Stage E.
-const SURL='https://nkkbvhtmlooverkhyqsa.supabase.co';
-const SKEY=['eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9','.eyJpc3MiOiJzdXBhYmFzZ','SIsInJlZiI6Im5ra2J2aH','RtbG9vdmVya2h5cXNhIiwi','cm9sZSI6ImFub24iLCJpYX','QiOjE3NzU2OTM1NTksImV4','cCI6MjA5MTI2OTU1OX0.7o','RpImggZHpvusrS6kJKWN6c','v12hYG4NqxUFCIZDCIs'].join('');
+// Stage D.2 — cmd.html reads/writes go through bridge HTTP. Direct SB client is
+// vestigial (no live SB.from() callsites left) but kept until a separate cleanup
+// pass since other modules may import it. 2026-05-07: default to test to match
+// index.html; override with localStorage.DASHBOARD_DB='prod'.
+const _DB_CFG={
+  prod:{
+    url:'https://nkkbvhtmlooverkhyqsa.supabase.co',
+    key:['eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9','.eyJpc3MiOiJzdXBhYmFzZ','SIsInJlZiI6Im5ra2J2aH','RtbG9vdmVya2h5cXNhIiwi','cm9sZSI6ImFub24iLCJpYX','QiOjE3NzU2OTM1NTksImV4','cCI6MjA5MTI2OTU1OX0.7o','RpImggZHpvusrS6kJKWN6c','v12hYG4NqxUFCIZDCIs'].join(''),
+  },
+  test:{
+    url:'https://lqyxvbhidkhaainruzuk.supabase.co',
+    key:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxxeXh2YmhpZGtoYWFpbnJ1enVrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3Mjc2MDMsImV4cCI6MjA5MzMwMzYwM30.phFXLNwx6KDC2-zzQZrTYStyTmy7YLNdJVmh03UyW8o',
+  },
+};
+const _DB_MODE=(localStorage.getItem('DASHBOARD_DB')||'test').toLowerCase()==='prod'?'prod':'test';
+const SURL=_DB_CFG[_DB_MODE].url;
+const SKEY=_DB_CFG[_DB_MODE].key;
 const SB=supabase.createClient(SURL,SKEY);
+console.log('[cmd] DASHBOARD_DB='+_DB_MODE+' → '+SURL);
 
 async function bridgeFetch(path,opts){
   opts=opts||{};
