@@ -699,6 +699,86 @@ const SURL=_DB_CFG[_DB_MODE].url;
 const SKEY=_DB_CFG[_DB_MODE].key;
 const SB=supabase.createClient(SURL,SKEY);
 console.log('[dashboard] DASHBOARD_DB='+_DB_MODE+' → '+SURL);
+
+// ── Bridge HTTP client (Stage C/D migration; replacing direct SB.from(...) calls) ──
+async function bridgeFetch(path,opts){
+  opts=opts||{};
+  const init={method:opts.method||'GET',headers:{'Content-Type':'application/json'}};
+  if(opts.body!=null) init.body=typeof opts.body==='string'?opts.body:JSON.stringify(opts.body);
+  try{
+    const res=await fetch(BRIDGE_URL+path,init);
+    const txt=await res.text();
+    let data=null; try{data=txt?JSON.parse(txt):null;}catch(_){}
+    if(!res.ok) return {ok:false,status:res.status,error:(data&&data.error)||res.statusText,data};
+    return {ok:true,status:res.status,data};
+  }catch(e){return {ok:false,error:String(e&&e.message||e)};}
+}
+
+// boss_tasks.id → request_code cache; populated lazily via /api/tasks/by-boss-task-id/{tid}
+const _RC_CACHE=new Map();
+async function getRequestCodeForBossTask(tid){
+  if(tid==null) return null;
+  const k=String(tid);
+  if(_RC_CACHE.has(k)) return _RC_CACHE.get(k);
+  const r=await bridgeFetch('/api/tasks/by-boss-task-id/'+encodeURIComponent(k));
+  if(r.ok && r.data && r.data.request_code){_RC_CACHE.set(k,r.data.request_code); return r.data.request_code;}
+  return null;
+}
+
+// ── Dashboard ↔ Bridge field converters ──
+function priorityToStar(p){return p==='high'?5:p==='low'?1:3;}
+function starToPriority(s){const n=parseInt(s);return n>=4?'high':n<=2?'low':'mid';}
+function dashTaskToBridgePatch(t){
+  const out={};
+  if(t.name!==undefined) out.title=t.name||'';
+  if(t.assignee!==undefined) out.target_name=t.assignee||'';
+  if(t.deadline!==undefined) out.deadline_locked=t.deadline?(/T/.test(t.deadline)?t.deadline:t.deadline+'T00:00:00Z'):null;
+  if(t.priority!==undefined) out.star=priorityToStar(t.priority);
+  if(t.notes!==undefined) out.notes=t.notes||'';
+  if(t.blocker!==undefined) out.blocker_text=t.blocker||'';
+  if(t.project!==undefined) out.project=t.project||null;
+  return out;
+}
+// Bridge status → dashboard kanban status (subset; cancelled has no kanban equivalent)
+const _BRIDGE_TO_DASH_STATUS={filling:'pending',pending_confirm:'pending',in_progress:'in-progress',delivered:'completed',cancelled:'completed'};
+
+// Stage D.4 — recruit target/progress now lives on bridge metadata. Helpers prefer the
+// structured fields and fall back to the legacy [target:N][progress:M] regex against
+// description for any rows that haven't migrated yet (transition only).
+function btTargetCount(bt){
+  if(!bt) return null;
+  if(bt.target_count!=null) return bt.target_count;
+  if(bt.metadata&&bt.metadata.target_count!=null) return bt.metadata.target_count;
+  const m=(bt.description||'').match(/\[target:(\d+)\]/);
+  return m?parseInt(m[1]):null;
+}
+function btProgressCount(bt){
+  if(!bt) return 0;
+  if(bt.progress_count!=null) return bt.progress_count;
+  if(bt.metadata&&bt.metadata.progress_count!=null) return bt.metadata.progress_count;
+  const m=(bt.description||'').match(/\[progress:(\d+)\]/);
+  return m?parseInt(m[1]):0;
+}
+function btIsRecruit(bt){const n=btTargetCount(bt);return n!=null&&n>0;}
+function bridgeTaskToDashTask(er){
+  return {
+    // Stage E.3 — request_code is the canonical id now that boss_tasks/tasks are dropped.
+    // metadata.dashboard_id is honored only if a legacy mirror previously set it.
+    id:(er.metadata&&er.metadata.dashboard_id)||er.request_code,
+    request_code:er.request_code,
+    name:er.title||er.content||'',
+    assignee:er.target_name||'',
+    deadline:er.deadline_locked||'',
+    priority:starToPriority(er.star),
+    status:_BRIDGE_TO_DASH_STATUS[er.status]||'pending',
+    blocker:er.blocker_text||'',
+    files:[],
+    notes:er.notes||'',
+    project:er.project||'',
+    metadata:er.metadata||{},
+    createdAt:er.created_at||'',
+  };
+}
 const PROJECTS=['w','理享招生项目'];
 const FALLBACK_PROJECT_MEMBERS={
   'w':[],
@@ -1078,26 +1158,30 @@ function Avatar({tasks, large}){
   const seenRef=useRef(new Set([...lsGet('qd_acked',[]),...lsGet('qd_trash',[]).map(t=>t.key)]));
   const msgTimeoutRef=useRef(null);
 
-  // 轮询员工回复（过滤已阅和已删）
+  // Stage D.3 — poll /api/messages?direction=executive_to_qidian instead of regex'ing
+  // boss_tasks.description for "回复" lines. Each event carries the parent task title +
+  // assignee (joined by the bridge endpoint) so the UI can render the same shape.
   useEffect(()=>{
     const poll=async()=>{
-      const {data}=await SB.from('boss_tasks').select('id,title,assignee,description').order('id',{ascending:false}).limit(50);
-      if(!data) return;
+      const r=await bridgeFetch('/api/messages?direction=executive_to_qidian&limit=50');
+      if(!r.ok || !r.data || !Array.isArray(r.data.messages)) return;
       const fresh=[];
-      data.forEach(bt=>{
-        const lines=(bt.description||'').split('\n').filter(l=>/回复[：:]/.test(l));
-        lines.forEach(line=>{
-          const key=`${bt.id}||${line}`;
-          if(!seenRef.current.has(key)){
-            seenRef.current.add(key);
-            const timeMatch=line.match(/\[([^\]]+)\]/);
-            const afterBracket=line.replace(/^\[[^\]]*\]\s*/,'');
-            const colonIdx=afterBracket.search(/回复[：:]/);
-            const replier=colonIdx>0?afterBracket.slice(0,colonIdx).trim():bt.assignee||'';
-            const text=afterBracket.slice(colonIdx>=0?afterBracket.indexOf('：',colonIdx)+1:afterBracket.indexOf(':')+1).trim()||afterBracket;
-            fresh.push({key,task:bt.title||'',assignee:replier,time:timeMatch?timeMatch[1]:'',text});
-          }
-        });
+      r.data.messages.forEach(m=>{
+        const eventId=m.id!=null?String(m.id):'';
+        const key=eventId?`${m.dashboard_id||m.request_code}||${eventId}`:`${m.dashboard_id||m.request_code}||${(m.text||'').slice(0,30)}`;
+        if(!seenRef.current.has(key)){
+          seenRef.current.add(key);
+          const time=m.created_at?new Date(m.created_at).toLocaleString('zh-CN',{hour12:false,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).replace(/\//g,'-'):'';
+          fresh.push({
+            key,
+            task:m.task_title||'',
+            assignee:m.task_assignee||m.from_name||'',
+            time,
+            text:m.text||'',
+            request_code:m.request_code,
+            bossTaskId:m.dashboard_id,
+          });
+        }
       });
       if(fresh.length>0){
         setReplies(p=>[...fresh,...p].slice(0,30));
@@ -1235,16 +1319,17 @@ function Avatar({tasks, large}){
   );
 
   const handleAck=async(reply)=>{
-    const btId=reply.key.split('||')[0];
-    const now=new Date().toLocaleString('zh-CN',{hour12:false,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).replace(/\//g,'-');
-    const ackLine='\n['+now+'] 老板已阅：'+reply.text.slice(0,60);
-    // 1. 写入 boss_tasks（流水账）
-    SB.from('boss_tasks').select('description').eq('id',btId).then(function(r){
-      var desc=(r.data&&r.data[0]?r.data[0].description:'')||'';
-      SB.from('boss_tasks').update({description:desc+ackLine}).eq('id',btId);
-    });
-    window.dispatchEvent(new CustomEvent('boss_task_acked',{detail:{btId,ackLine,assignee:reply.assignee,task:reply.task}}));
-    // 2. 持久化已阅 key，从 replies 移除
+    // Stage C.4 — POST /boss-ack writes message_events with direction='boss_to_qidian'.
+    // Prefer reply.request_code (set by D.3 message poll); fall back to id reverse-lookup
+    // for any legacy entries that came in via the older description regex path.
+    const rc=reply.request_code||await getRequestCodeForBossTask(reply.bossTaskId||reply.key.split('||')[0]);
+    if(rc){
+      bridgeFetch('/api/tasks/'+encodeURIComponent(rc)+'/boss-ack',{
+        method:'POST',
+        body:{text:(reply.text||'').slice(0,60),from_name:'boss'},
+      });
+    }
+    window.dispatchEvent(new CustomEvent('boss_task_acked',{detail:{btId:reply.bossTaskId,assignee:reply.assignee,task:reply.task}}));
     const next=new Set([...ackedKeys,reply.key]);
     setAckedKeys(next);
     lsSet('qd_acked',[...next]);
@@ -1826,71 +1911,69 @@ function VoiceFloat({tasks}){
   };
 
   // 接收已填完的 task，执行存档 + 通知
+  // Stage C.5 — bridge owns persistence. Dashboard sends ONE call to /api/frontend-actions;
+  // bridge creates executive_requests + outbox row + (via legacy_mirror) the boss_tasks/tasks
+  // legacy rows. Dashboard no longer direct-writes Supabase here. Dispatch state writes
+  // (qidian_notified / tg_sent / qidian_dispatched_at / qidian_dispatch_error) are also
+  // owned by bridge — the API response carries enough info; failures land in the outbox
+  // row's status, not in dashboard state.
   const confirmAndDispatch=async(task)=>{
     if(!task) return;
     const assignee=task.assignee||'';
     const proj=task.project||'其他';
     const projLabel=proj==='其他'?'其他项目':proj;
-
-    // 1. 写入指令台 + 任务看板
     const tid=Date.now();
-    // 如果是招生类任务且标题含数字，自动加 [target:N][progress:0]
     const _recruitKW=['招生','招人','学生','辅导师','招聘','招募'];
     const _isRecruitTask=_recruitKW.some(kw=>(task.title||'').includes(kw)||(task.description||'').includes(kw));
     const _numM=(task.title||'').match(/(\d+)/);
     const _targetN=_isRecruitTask&&_numM?parseInt(_numM[1]):0;
-    const _targetPrefix=_targetN>0?('[target:'+_targetN+']\n[progress:0]\n'):'';
-    const btDesc=_targetPrefix+(task.description||'');
-    const bt={id:tid,title:task.title||'',assignee,deadline:task.deadline||null,priority:task.priority||'mid',description:btDesc,status:'in-progress',tg_sent:false,qidian_notified:false,created_at:new Date().toISOString()};
-    const insertRes=await SB.from('boss_tasks').insert([bt]);
-    if(insertRes.error) console.error('[boss_tasks insert 失败]',insertRes.error);
-    const taskRow={id:Date.now(),name:task.title||'',assignee,deadline:task.deadline||null,priority:task.priority||'mid',status:'in-progress',blocker:'',files:[],notes:task.description||'',project:proj==='其他'?null:proj,created_at:(task.deadline||new Date().toISOString().split('T')[0])};
-    SB.from('tasks').insert([taskRow]).select().then(function(res){
-      var ins=res.data;
-      if(ins&&ins[0]) window.dispatchEvent(new CustomEvent('walle_task_created',{detail:ins[0]}));
-    });
 
-    // 招生任务联动：韩笑主导时，吴晓磊同步写入任务 + 通知
+    // Optimistic local kanban row so the boss sees the card immediately. The 15s
+    // poll (Stage D will replace this with /api/tasks) will reconcile to canonical.
+    const localRow={id:tid,name:task.title||'',assignee,deadline:task.deadline||null,priority:task.priority||'mid',status:'in-progress',blocker:'',files:[],notes:task.description||'',project:proj==='其他'?null:proj,createdAt:(task.deadline||new Date().toISOString().split('T')[0])};
+    window.dispatchEvent(new CustomEvent('walle_task_created',{detail:localRow}));
+
+    // 韩笑+吴晓磊 协同任务：保留可视化双卡片，但同样走 bridge（不触发第二次 Telegram 派单）。
     const RECRUIT_KW=['招生','招人','学生','辅导师','辅导'];
     const isRecruit=RECRUIT_KW.some(kw=>(task.title||'').includes(kw)||(task.description||'').includes(kw));
     if(isRecruit&&assignee==='韩笑'){
       const coworker='吴晓磊';
-      const coRow={id:Date.now()+1,name:task.title||'',assignee:coworker,deadline:task.deadline||null,priority:task.priority||'mid',status:'in-progress',blocker:'',files:[],notes:'协同韩笑：'+(task.description||''),project:proj==='其他'?null:proj,created_at:(task.deadline||new Date().toISOString().split('T')[0])};
-      SB.from('tasks').insert([coRow]).select().then(function(res){
-        var ins=res.data;
-        if(ins&&ins[0]) window.dispatchEvent(new CustomEvent('walle_task_created',{detail:ins[0]}));
-      });
+      bridgeFetch('/api/tasks',{method:'POST',body:{
+        target_name:coworker,
+        title:task.title||'',
+        content:task.title||'',
+        deadline_locked:task.deadline?(task.deadline+'T00:00:00Z'):null,
+        star:priorityToStar(task.priority||'mid'),
+        project:proj==='其他'?null:proj,
+        notes:'协同韩笑：'+(task.description||''),
+      }});
+      const coLocalRow={...localRow,id:tid+1,assignee:coworker,notes:'协同韩笑：'+(task.description||'')};
+      window.dispatchEvent(new CustomEvent('walle_task_created',{detail:coLocalRow}));
     }
 
-    // 3. 交给 QidianBot 经协作群通知高管 bot
+    // 主任务：交给 bridge 完成 ER + outbox + 派单 + 招生 metadata
     let queued=false;
-    try{
-      const actionRes=await fetch(`${BRIDGE_URL}/api/frontend-actions`,{
+    const r=await bridgeFetch('/api/frontend-actions',{method:'POST',body:{
+      type:'assign_task',
+      request_code:'QR-FE-'+tid,
+      task_id:tid,
+      title:task.title||'',
+      assignee,
+      deadline:task.deadline||null,
+      priority:task.priority||'mid',
+      project:projLabel,
+      description:task.description||'',
+    }});
+    queued=!!(r.ok && r.data && r.data.ok);
+    if(!queued) console.warn('[frontend-action失败]',r.error||r.data);
+    // 招生 [target:N] — Stage C.5 redirects to bridge /progress endpoint instead of
+    // embedding the regex tag in description. Mirror still backfills description for
+    // legacy regex consumers during transition (Stage D removes them).
+    if(queued && _targetN>0){
+      bridgeFetch('/api/tasks/'+encodeURIComponent('QR-FE-'+tid)+'/progress',{
         method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-          type:'assign_task',
-          request_code:'QR-FE-'+tid,
-          task_id:tid,
-          title:task.title||'',
-          assignee,
-          deadline:task.deadline||null,
-          priority:task.priority||'mid',
-          project:projLabel,
-          description:task.description||''
-        })
+        body:{value:0,target:_targetN},
       });
-      const actionData=await actionRes.json();
-      queued=!!actionData.ok;
-      if(actionData.ok){
-        await SB.from('boss_tasks').update({tg_sent:true,qidian_notified:true,qidian_dispatched_at:new Date().toISOString(),qidian_dispatch_error:null}).eq('id',tid);
-      }else{
-        console.warn('[frontend-action失败]',actionData);
-        await SB.from('boss_tasks').update({qidian_dispatch_error:actionData.error||'frontend-action失败'}).eq('id',tid);
-      }
-    }catch(e){
-      console.warn('[frontend-action异常]',e);
-      await SB.from('boss_tasks').update({qidian_dispatch_error:String(e&&e.message||e)}).eq('id',tid);
     }
 
     // 4. 语音确认（speak 会自动恢复监听）
@@ -2042,27 +2125,40 @@ function ProjectBody({proj,persons,bossTasks,openPerson,setOpenPerson,statusDot,
   const fixedRaw=PROJECT_MEMBERS[proj]||[];
   const bts=bossTasks||[];
 
-  // 为某人从 boss_tasks 构建流水账
+  // 为某人从 boss_tasks 构建流水账 — Stage D.5: prefer structured _events from
+  // /api/messages over description-string parsing. Fall back to legacy regex if a row
+  // is missing _events (e.g. immediately after creation, before next refetch).
   const buildBTLog=function(name){
     var entries=[];
     bts.forEach(function(bt){
       var created=bt.created_at?new Date(bt.created_at).toLocaleString('zh-CN',{hour12:false,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).replace(/\//g,'-'):'';
-      // task creation entry belongs to the assignee
       if(bt.assignee===name) entries.push({dot:'issue',text:'📋 下达任务：'+bt.title,time:created});
-      (bt.description||'').split('\n').filter(Boolean).forEach(function(line){
-        var m=line.match(/^\[([^\]]+)\]\s*(.+)/);
-        if(!m) return;
-        var time=m[1],content=m[2];
-        if(/回复[：:]/.test(content)){
-          // attribute reply to the actual replier extracted from content
-          var rm=content.match(/回复[：:](.+?)[:：]/);
-          var replier=rm?rm[1].trim():'';
-          if(replier===name) entries.push({dot:'reply',text:'💬 '+content,time:time});
-        } else if(/老板已阅/.test(content)){
-          // ack belongs to the task assignee
-          if(bt.assignee===name) entries.push({dot:'ack',text:'✅ '+content,time:time});
-        }
-      });
+      var events=bt._events;
+      if(Array.isArray(events) && events.length>0){
+        events.forEach(function(ev){
+          var t=ev.created_at?new Date(ev.created_at).toLocaleString('zh-CN',{hour12:false,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).replace(/\//g,'-'):'';
+          var text=ev.text||'';
+          if(ev.direction==='executive_to_qidian'){
+            var who=ev.from_name||bt.assignee||'';
+            if(who===name) entries.push({dot:'reply',text:'💬 '+who+'回复：'+text,time:t});
+          } else if(ev.direction==='boss_to_qidian'){
+            if(bt.assignee===name) entries.push({dot:'ack',text:'✅ 老板已阅：'+text,time:t});
+          }
+        });
+      } else {
+        (bt.description||'').split('\n').filter(Boolean).forEach(function(line){
+          var m=line.match(/^\[([^\]]+)\]\s*(.+)/);
+          if(!m) return;
+          var time=m[1],content=m[2];
+          if(/回复[：:]/.test(content)){
+            var rm=content.match(/回复[：:](.+?)[:：]/);
+            var replier=rm?rm[1].trim():'';
+            if(replier===name) entries.push({dot:'reply',text:'💬 '+content,time:time});
+          } else if(/老板已阅/.test(content)){
+            if(bt.assignee===name) entries.push({dot:'ack',text:'✅ '+content,time:time});
+          }
+        });
+      }
     });
     entries.sort(function(a,b){return a.time>b.time?1:-1;});
     return entries;
@@ -2131,18 +2227,15 @@ function ProjectBody({proj,persons,bossTasks,openPerson,setOpenPerson,statusDot,
           )}
         </div>
       )}
-      {/* --- 目标任务进度条（仅 progress 视图） --- */}
+      {/* --- 目标任务进度条（仅 progress 视图） — Stage D.4: helpers replace regex --- */}
       {section==='progress'&&(function(){
-        var targetBts=bts.filter(function(bt){return /\[target:\d+\]/.test(bt.description||'');});
+        var targetBts=bts.filter(btIsRecruit);
         if(targetBts.length===0) return null;
         return React.createElement('div',{style:{marginBottom:14}},
           React.createElement('div',{className:'proj-org-section-title'},'🎯 目标任务进度'),
           targetBts.map(function(bt){
-            var desc=bt.description||'';
-            var tM=desc.match(/\[target:(\d+)\]/);
-            var pM=desc.match(/\[progress:(\d+)\]/);
-            var target=tM?parseInt(tM[1]):0;
-            var progress=pM?parseInt(pM[1]):0;
+            var target=btTargetCount(bt)||0;
+            var progress=btProgressCount(bt);
             var pct=target>0?Math.min(100,Math.round(progress/target*100)):0;
             return React.createElement('div',{key:bt.id,style:{background:'#fff',borderRadius:10,padding:'10px 12px',marginBottom:8,border:'1px solid #E5E7EB'}},
               React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}},
@@ -2172,14 +2265,12 @@ function ProjectBody({proj,persons,bossTasks,openPerson,setOpenPerson,statusDot,
         var isPersonOpen=openPerson===pkey;
         var pDone=ptasks.filter(function(t){return t.status==='completed';}).length;
         var pBlock=ptasks.filter(function(t){return t.status==='blocked';}).length;
-        // 计算完成百分比：优先用 boss_tasks 的 progress/target（关联PT），否则用任务完成数
+        // 完成百分比：优先用 bridge metadata 的 target/progress；回退到任务完成数
         var pctLabel=(function(){
-          var bt=(bts||[]).filter(function(b){return b.assignee===name&&/\[target:\d+\]/.test(b.description||'');}).sort(function(a,b){return b.id-a.id;})[0];
+          var bt=(bts||[]).filter(function(b){return b.assignee===name&&btIsRecruit(b);}).sort(function(a,b){return (b.id||0)-(a.id||0);})[0];
           if(bt){
-            var tM=(bt.description||'').match(/\[target:(\d+)\]/);
-            var pM=(bt.description||'').match(/\[progress:(\d+)\]/);
-            var target=tM?parseInt(tM[1]):0;
-            var prog=pM?parseInt(pM[1]):0;
+            var target=btTargetCount(bt)||0;
+            var prog=btProgressCount(bt);
             if(target>0) return Math.round(prog/target*100)+'%';
           }
           if(ptasks.length>0) return Math.round(pDone/ptasks.length*100)+'%';
@@ -2951,12 +3042,10 @@ function LeaderboardPage({onBack}){
     const calc=(bts)=>{
       const map={};
       bts.forEach(bt=>{
-        const desc=bt.description||'';
-        const tM=desc.match(/\[target:(\d+)\]/);
-        const pM=desc.match(/\[progress:(\d+)\]/);
-        if(!tM||!bt.assignee)return;
-        const target=parseInt(tM[1]);
-        const progress=pM?parseInt(pM[1]):0;
+        if(!bt.assignee) return;
+        const target=btTargetCount(bt);
+        if(!target) return;
+        const progress=btProgressCount(bt);
         const pt=Math.floor(progress/target*10);
         const name=bt.assignee;
         if(map[name]==null||pt>map[name])map[name]=pt;
@@ -2965,8 +3054,19 @@ function LeaderboardPage({onBack}){
       Object.keys(wp).forEach(n=>{if(wp[n]!=null&&(map[n]==null||wp[n]>map[n]))map[n]=wp[n];});
       return map;
     };
-    const load=()=>SB.from('boss_tasks').select('*').then(({data})=>{
-      const bts=data||[];setBT(bts);setPts(calc(bts));
+    // Stage D.4 — leaderboard reads from bridge /api/tasks (executive_requests).
+    const load=()=>bridgeFetch('/api/tasks?limit=200').then(r=>{
+      if(!r.ok || !r.data || !Array.isArray(r.data.tasks)){setBT([]);setPts(calc([]));return;}
+      const bts=r.data.tasks.map(t=>({
+        id:(t.metadata&&t.metadata.dashboard_id)||t.request_code,
+        title:t.title||t.content||'',
+        assignee:t.target_name||'',
+        description:t.notes||t.content||'',
+        target_count:t.metadata&&t.metadata.target_count,
+        progress_count:t.metadata&&t.metadata.progress_count,
+        metadata:t.metadata||{},
+      }));
+      setBT(bts);setPts(calc(bts));
     });
     load();
     const t=setInterval(load,15000);
@@ -2984,11 +3084,9 @@ function LeaderboardPage({onBack}){
   const members=ALL_MEMBERS.map(name=>{
     const pt=pts[name]??0;
     const orgData=ORG.find(o=>o.name===name)||{title:'',cls:'',lv:6,dept:''};
-    const bt=bossTasks.filter(t=>t.assignee===name&&/\[target:\d+\]/.test(t.description||'')).sort((a,b)=>b.id-a.id)[0];
-    const tM=bt?(bt.description||'').match(/\[target:(\d+)\]/):null;
-    const pM=bt?(bt.description||'').match(/\[progress:(\d+)\]/):null;
-    const target=tM?parseInt(tM[1]):0;
-    const progress=pM?parseInt(pM[1]):0;
+    const bt=bossTasks.filter(t=>t.assignee===name&&btIsRecruit(t)).sort((a,b)=>(b.id||0)-(a.id||0))[0];
+    const target=btTargetCount(bt)||0;
+    const progress=btProgressCount(bt);
     const pct=target>0?Math.round(progress/target*100):0;
     return{name,pt,target,progress,pct,orgData};
   }).sort((a,b)=>b.pt-a.pt||(b.pct-a.pct));
@@ -3119,34 +3217,51 @@ function App(){
     loadRoster().finally(()=>setRosterVersion(v=>v+1));
   },[]);
 
-  // boss_tasks 拉取 + 新回复通知 + 30s 轮询
-  const prevBTDescRef=useRef({});   // {taskId: descLength}
-  const lastFinIdRef=useRef(0);     // 上次已见 finance_record id
+  // Stage D.4 — bossTasks state is now derived from /api/tasks (executive_requests).
+  // We keep the React state name `bossTasks` because downstream consumers (PT calc,
+  // recruit progress display) still spell it that way; the shape now mirrors the
+  // bridge ER row plus the legacy `description` field rebuilt from `notes` so any
+  // remaining text-display callsites keep working until E removes them.
+  // New-reply notifications are now driven by D.3's /api/messages poll, not by
+  // observing description-length deltas.
+  const lastFinIdRef=useRef(0);     // 上次已见 finance_record id (still SB-direct; finance migration is a future stage)
 
   useEffect(()=>{
-    const fetchBT=()=>SB.from('boss_tasks').select('*').order('id',{ascending:false}).limit(100).then(({data})=>{
-      if(!data) return;
-      const isFirst=Object.keys(prevBTDescRef.current).length===0;
-      if(!isFirst){
-        data.forEach(t=>{
-          const prev=prevBTDescRef.current[t.id]||0;
-          const cur=(t.description||'').length;
-          if(cur>prev){
-            // 从新增内容里提取回复者
-            const newChunk=(t.description||'').slice(prev);
-            const m=newChunk.match(/\]\s*(.+?)回复：/);
-            const who=m?m[1]:'成员';
-            setToast(`📩 ${who} 有新消息 → ${t.title||t.assignee||''}`);
-            // 通知 Avatar 同步
-            window.dispatchEvent(new CustomEvent('qidian_new_reply',{detail:{who,task:t.title||t.assignee||''}}));
-          }
+    const fetchBT=async()=>{
+      // Stage D.4 + D.5 — fetch tasks AND recent message events in parallel; attach
+      // events onto each bossTask row so per-person activity timeline (buildBTLog in
+      // ProjectBody) can switch from description regex to structured events.
+      const [tasksRes, msgsRes] = await Promise.all([
+        bridgeFetch('/api/tasks?limit=100'),
+        bridgeFetch('/api/messages?limit=300'),
+      ]);
+      if(!tasksRes.ok || !tasksRes.data || !Array.isArray(tasksRes.data.tasks)) return;
+      const eventsByCode={};
+      if(msgsRes.ok && msgsRes.data && Array.isArray(msgsRes.data.messages)){
+        msgsRes.data.messages.forEach(m=>{
+          if(!m.request_code) return;
+          (eventsByCode[m.request_code]=eventsByCode[m.request_code]||[]).push(m);
         });
       }
-      data.forEach(t=>{ prevBTDescRef.current[t.id]=(t.description||'').length; });
-      setBossTasks(data);
-    });
+      const rows=tasksRes.data.tasks.map(t=>({
+        id:(t.metadata&&t.metadata.dashboard_id)||t.request_code,
+        request_code:t.request_code,
+        title:t.title||t.content||'',
+        assignee:t.target_name||'',
+        priority:t.star>=4?'high':t.star<=2?'low':'mid',
+        status:_BRIDGE_TO_DASH_STATUS[t.status]||'pending',
+        description:t.notes||t.content||'',
+        project:t.project||'',
+        deadline:t.deadline_locked||null,
+        created_at:t.created_at||new Date().toISOString(),
+        target_count:t.metadata&&t.metadata.target_count,
+        progress_count:t.metadata&&t.metadata.progress_count,
+        metadata:t.metadata||{},
+        _events:eventsByCode[t.request_code]||[],
+      }));
+      setBossTasks(rows);
+    };
 
-    // finance_records 新条目通知
     const fetchFin=()=>{
       const since=lastFinIdRef.current;
       if(!since) return;
@@ -3161,27 +3276,25 @@ function App(){
       });
     };
 
-    // 初始化：记录当前最新 finance id 作为基准，不弹旧数据
     SB.from('finance_records').select('id').order('id',{ascending:false}).limit(1).then(({data})=>{
       if(data&&data.length>0) lastFinIdRef.current=data[0].id;
     });
 
     fetchBT();
-    const timer=setInterval(()=>{fetchBT();fetchFin();},15000); // 缩短到15s更及时
+    const timer=setInterval(()=>{fetchBT();fetchFin();},15000);
     const onAck=()=>fetchBT();
     window.addEventListener('boss_task_acked',onAck);
     return()=>{clearInterval(timer);window.removeEventListener('boss_task_acked',onAck);};
   },[]);
 
+  // Stage D.1 — kanban fetches from bridge GET /api/tasks. metadata.dashboard_id is the
+  // stable React key (set by legacy_mirror at create time). Cancelled tasks are filtered.
   useEffect(()=>{
-    SB.from('tasks').select('*').order('id').then(async({data,error})=>{
-      if(!error){
-        if(!data||data.length===0){
-          const {data:ins}=await SB.from('tasks').insert(DEMO.map(taskToDb)).select();
-          setTasks((ins||[]).map(dbToTask));
-        } else {
-          setTasks(data.map(dbToTask));
-        }
+    bridgeFetch('/api/tasks?limit=200').then(r=>{
+      if(r.ok && r.data && Array.isArray(r.data.tasks)){
+        const visible=r.data.tasks.filter(t=>t.status!=='cancelled').map(bridgeTaskToDashTask);
+        visible.forEach(t=>{if(t.id!=null && t.request_code) _RC_CACHE.set(String(t.id),t.request_code);});
+        setTasks(visible);
       }
       setLoading(false);
     });
@@ -3200,15 +3313,12 @@ function App(){
     Object.entries(map).forEach(([name,{total,done}])=>{
       ptMap[name]=total>0?Math.floor(done/total*10):0;
     });
-    // 叠加 boss_tasks 中带 [target:N][progress:M] 的目标任务
+    // 叠加 bridge metadata 中含 target/progress 的招生任务（替代旧 [target:N][progress:M] 正则）
     bossTasks.forEach(bt=>{
-      const desc=bt.description||'';
-      const tM=desc.match(/\[target:(\d+)\]/);
-      const pM=desc.match(/\[progress:(\d+)\]/);
-      if(!tM||!bt.assignee) return;
-      const target=parseInt(tM[1]);
-      const progress=pM?parseInt(pM[1]):0;
-      if(target<=0) return;
+      if(!bt.assignee) return;
+      const target=btTargetCount(bt);
+      if(!target) return;
+      const progress=btProgressCount(bt);
       const btPt=Math.floor(progress/target*10);
       const name=bt.assignee;
       if(ptMap[name]==null||btPt>ptMap[name]) ptMap[name]=btPt;
@@ -3231,20 +3341,77 @@ function App(){
   },[]);
 
   const notify=msg=>setToast(msg);
+  // Stage C.1 — Edit button: PATCH bridge instead of direct SB write. Bridge mirror
+  // backfills boss_tasks/tasks during transition (Stage E removes mirror).
+  // Stage C.5 — New-task path: POST /api/tasks for form-created tasks too. Bridge
+  // mirror creates legacy rows. Voice-driven confirmAndDispatch keeps using
+  // /api/frontend-actions until later in this stage (separate flow).
   const save=async t=>{
     if(editTask){
-      const {data}=await SB.from('tasks').update(taskToDb(t)).eq('id',t.id).select();
-      if(data) setTasks(p=>p.map(x=>x.id===t.id?dbToTask(data[0]):x));
+      const rc=t.request_code||editTask.request_code||await getRequestCodeForBossTask(t.id);
+      if(!rc){notify('找不到对应工单（bridge）'); return;}
+      const r=await bridgeFetch('/api/tasks/'+encodeURIComponent(rc),{method:'PATCH',body:dashTaskToBridgePatch(t)});
+      if(!r.ok){notify('保存失败：'+(r.error||'bridge')); return;}
+      // Optimistic local update — bridge mirror keeps tasks/boss_tasks consistent
+      setTasks(p=>p.map(x=>x.id===t.id?{...x,...t}:x));
       notify('任务已更新');
     } else {
-      const {data}=await SB.from('tasks').insert([taskToDb(t)]).select();
-      if(data) setTasks(p=>[...p,dbToTask(data[0])]);
+      const r=await bridgeFetch('/api/tasks',{method:'POST',body:{
+        target_name:t.assignee||'',
+        title:t.name||'',
+        content:t.name||'',
+        deadline_locked:t.deadline?(t.deadline+'T00:00:00Z'):null,
+        star:priorityToStar(t.priority),
+        project:t.project||null,
+        notes:t.notes||null,
+      }});
+      if(!r.ok){notify('创建失败：'+(r.error||'bridge')); return;}
+      // bridge generated dashboard_id via mirror; refetch this row to populate full local state
+      // (cheap fallback: optimistic with placeholder id; real id comes back on next 15s poll)
+      const placeholder={...t,request_code:r.data&&r.data.request_code,id:t.id||Date.now()};
+      setTasks(p=>[...p,placeholder]);
       notify('任务已创建');
     }
     setShowForm(false);setEditTask(null);
   };
-  const del=async id=>{await SB.from('tasks').delete().eq('id',id);setTasks(p=>p.filter(t=>t.id!==id));notify('已删除');};
-  const cycle=async id=>{const task=tasks.find(t=>t.id===id);if(!task)return;const i=(SCYCLE.indexOf(task.status)+1)%SCYCLE.length;const ns=SCYCLE[i];await SB.from('tasks').update({status:ns}).eq('id',id);setTasks(p=>p.map(t=>t.id===id?{...t,status:ns}:t));};
+  // Stage C.3 — Delete: /cancel endpoint.
+  const del=async id=>{
+    const t=tasks.find(x=>x.id===id);
+    const rc=(t&&t.request_code)||await getRequestCodeForBossTask(id);
+    if(!rc){notify('找不到对应工单'); return;}
+    const r=await bridgeFetch('/api/tasks/'+encodeURIComponent(rc)+'/cancel',{method:'POST'});
+    if(!r.ok){notify('删除失败：'+(r.error||'bridge')); return;}
+    setTasks(p=>p.filter(t=>t.id!==id));
+    notify('已删除');
+  };
+  // Stage C.2 — Status cycle: drives the bridge state machine.
+  // Mapping (dashboard SCYCLE → bridge action):
+  //   pending → in-progress: POST /dispatch (filling/pending_confirm → in_progress)
+  //   in-progress → blocked: POST /phase {phase:'blocked'} (status stays in_progress)
+  //   blocked → completed:   POST /deliver (in_progress → delivered)
+  //   completed → pending:   POST /cancel then... no clean path; treat as no-op for now
+  const cycle=async id=>{
+    const task=tasks.find(t=>t.id===id);
+    if(!task) return;
+    const i=(SCYCLE.indexOf(task.status)+1)%SCYCLE.length;
+    const ns=SCYCLE[i];
+    const rc=task.request_code||await getRequestCodeForBossTask(id);
+    if(!rc){notify('找不到对应工单'); return;}
+    let r;
+    if(ns==='in-progress'){
+      r=await bridgeFetch('/api/tasks/'+encodeURIComponent(rc)+'/dispatch',{method:'POST'});
+    } else if(ns==='blocked'){
+      r=await bridgeFetch('/api/tasks/'+encodeURIComponent(rc)+'/phase',{method:'POST',body:{phase:'blocked'}});
+    } else if(ns==='completed'){
+      r=await bridgeFetch('/api/tasks/'+encodeURIComponent(rc)+'/deliver',{method:'POST',body:{}});
+    } else if(ns==='pending'){
+      // No clean state-machine reverse from completed → filling. Skip the bridge call;
+      // local UI moves on. Stage E will reconcile semantics.
+      r={ok:true};
+    }
+    if(!r.ok){notify('状态切换失败：'+(r.error||'bridge')); return;}
+    setTasks(p=>p.map(t=>t.id===id?{...t,status:ns}:t));
+  };
   if(loading)return(<div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:12,background:'linear-gradient(150deg,#F0FDF4,#F8FAFC,#ECFDF5)'}}><div style={{width:36,height:36,border:'3px solid #22C55E',borderTopColor:'transparent',borderRadius:'50%',animation:'spin 1s linear infinite'}}/><div style={{color:'#6B7280',fontSize:'.88rem'}}>连接数据库中...</div></div>);
 
   const today=new Date();today.setHours(0,0,0,0);

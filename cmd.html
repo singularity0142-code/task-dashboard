@@ -106,9 +106,42 @@ body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;
 const {useState,useEffect,useCallback}=React;
 const BRIDGE_URL=(localStorage.getItem('QIDIAN_BRIDGE_URL')||window.QIDIAN_BRIDGE_URL||'https://35.79.2.111/qidian').replace(/\/$/,'');
 
+// Stage D.2 — cmd.html reads/writes go through bridge HTTP. Supabase client kept only
+// as a fallback during transition; remove in Stage E.
 const SURL='https://nkkbvhtmlooverkhyqsa.supabase.co';
 const SKEY=['eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9','.eyJpc3MiOiJzdXBhYmFzZ','SIsInJlZiI6Im5ra2J2aH','RtbG9vdmVya2h5cXNhIiwi','cm9sZSI6ImFub24iLCJpYX','QiOjE3NzU2OTM1NTksImV4','cCI6MjA5MTI2OTU1OX0.7o','RpImggZHpvusrS6kJKWN6c','v12hYG4NqxUFCIZDCIs'].join('');
 const SB=supabase.createClient(SURL,SKEY);
+
+async function bridgeFetch(path,opts){
+  opts=opts||{};
+  const init={method:opts.method||'GET',headers:{'Content-Type':'application/json'}};
+  if(opts.body!=null) init.body=typeof opts.body==='string'?opts.body:JSON.stringify(opts.body);
+  try{
+    const res=await fetch(BRIDGE_URL+path,init);
+    const txt=await res.text();
+    let data=null; try{data=txt?JSON.parse(txt):null;}catch(_){}
+    if(!res.ok) return {ok:false,status:res.status,error:(data&&data.error)||res.statusText,data};
+    return {ok:true,status:res.status,data};
+  }catch(e){return {ok:false,error:String(e&&e.message||e)};}
+}
+// bridge ER status → cmd.html legacy status (kept for SS/STATUS_FLOW lookup compatibility)
+const _BRIDGE_TO_CMD_STATUS={filling:'pending',pending_confirm:'sent',in_progress:'in-progress',delivered:'completed',cancelled:null};
+function bridgeTaskToCmdRow(er){
+  const s=_BRIDGE_TO_CMD_STATUS[er.status]||'pending';
+  if(s===null) return null;
+  return {
+    id:er.metadata&&er.metadata.dashboard_id?er.metadata.dashboard_id:er.request_code,
+    request_code:er.request_code,
+    title:er.title||er.content||'',
+    assignee:er.target_name||'',
+    deadline:er.deadline_locked||null,
+    priority:er.star>=4?'high':er.star<=2?'low':'mid',
+    status:s,
+    description:er.notes||er.content||'',
+    project:er.project||'',
+    created_at:er.created_at||new Date().toISOString(),
+  };
+}
 
 const PC={high:'#EF4444',mid:'#F59E0B',low:'#10B981'};
 const SS={
@@ -139,8 +172,11 @@ function App(){
 
   const load=useCallback(async(quiet=false)=>{
     if(!quiet){setSpinning(true);}
-    const {data,error}=await SB.from('boss_tasks').select('*').order('id',{ascending:false});
-    if(!error) setTasks(data||[]);
+    const r=await bridgeFetch('/api/tasks?limit=200');
+    if(r.ok && r.data && Array.isArray(r.data.tasks)){
+      const rows=r.data.tasks.map(bridgeTaskToCmdRow).filter(Boolean);
+      setTasks(rows);
+    }
     setLoading(false);
     setSpinning(false);
   },[]);
@@ -151,9 +187,20 @@ function App(){
     return()=>clearInterval(t);
   },[load]);
 
+  // Stage C/D: status cycle drives bridge state machine (POST /dispatch or /deliver).
+  // Some legacy transitions (e.g. arbitrary jumps like reported→pending) have no bridge
+  // equivalent; those become local-only UI updates that the next refresh reconciles.
   const cycleStatus=async(id,cur)=>{
     const ns=STATUS_FLOW[(STATUS_FLOW.indexOf(cur)+1)%STATUS_FLOW.length];
-    await SB.from('boss_tasks').update({status:ns}).eq('id',id);
+    const task=tasks.find(t=>t.id===id);
+    const rc=task&&task.request_code;
+    if(rc){
+      let r={ok:true};
+      if(ns==='in-progress') r=await bridgeFetch('/api/tasks/'+encodeURIComponent(rc)+'/dispatch',{method:'POST'});
+      else if(ns==='completed') r=await bridgeFetch('/api/tasks/'+encodeURIComponent(rc)+'/deliver',{method:'POST',body:{}});
+      // sent / reported / pending have no canonical bridge transition — treat as visual cycle only
+      if(!r.ok){showToast('状态切换失败：'+(r.error||'bridge')); return;}
+    }
     setTasks(p=>p.map(t=>t.id===id?{...t,status:ns}:t));
     showToast(`状态已更新：${SS[ns]?.lb||ns}`);
   };
