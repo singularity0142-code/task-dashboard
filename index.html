@@ -743,7 +743,20 @@ function dashTaskToBridgePatch(t){
   const out={};
   if(t.name!==undefined) out.title=t.name||'';
   if(t.assignee!==undefined) out.target_name=t.assignee||'';
-  if(t.deadline!==undefined) out.deadline_locked=t.deadline?(/T/.test(t.deadline)?t.deadline:t.deadline+'T00:00:00Z'):null;
+  if(t.deadline!==undefined){
+    let d=t.deadline||null;
+    if(d){
+      // Form stores deadline in a few shapes: "YYYY-MM-DD" (date picker),
+      // "YYYY-MM-DDTHH:MM" (datetime-local raw), and "YYYY-MM-DD HH:MM"
+      // (missing-field picker normalizes T→space at index.html:1562).
+      // Normalize all three to a real ISO timestamptz for executive_requests.
+      d=String(d).trim().replace(' ','T');
+      if(/^\d{4}-\d{2}-\d{2}$/.test(d)) d+='T00:00:00Z';
+      else if(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(d)) d+=':00Z';
+      else if(!(/Z$/.test(d) || /[+-]\d{2}:?\d{2}$/.test(d))) d+='Z';
+    }
+    out.deadline_locked=d;
+  }
   if(t.priority!==undefined) out.star=priorityToStar(t.priority);
   if(t.notes!==undefined) out.notes=t.notes||'';
   if(t.blocker!==undefined) out.blocker_text=t.blocker||'';
