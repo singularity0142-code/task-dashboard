@@ -680,7 +680,16 @@ body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;backgr
 <div id="root"></div>
 <script type="text/babel">
 const {useState,useEffect,useRef}=React;
-const BRIDGE_URL=(localStorage.getItem('QIDIAN_BRIDGE_URL')||window.QIDIAN_BRIDGE_URL||'https://35.79.2.111/qidian').replace(/\/$/,'');
+// 2026-05-07 cleanup: when dashboard is opened locally (file:// or localhost),
+// auto-target a local bridge on :8788 so the sim panel pipeline works without
+// browser-side localStorage tweaking. Override at any time with
+// localStorage.setItem('QIDIAN_BRIDGE_URL', '...'). Production deployments
+// (35.79.2.111 et al.) are unaffected — the auto-detect only kicks in for
+// localhost / 127.0.0.1 / 0.0.0.0 / file:// origins.
+const _LOCAL_HOSTS=new Set(['localhost','127.0.0.1','0.0.0.0','']);
+const _IS_LOCAL=_LOCAL_HOSTS.has(window.location.hostname||'');
+const BRIDGE_URL=(localStorage.getItem('QIDIAN_BRIDGE_URL')||window.QIDIAN_BRIDGE_URL||(_IS_LOCAL?'http://127.0.0.1:8788':'https://35.79.2.111/qidian')).replace(/\/$/,'');
+console.log('[dashboard] BRIDGE_URL='+BRIDGE_URL);
 function getPT(name){const m=(window.__ptMap||{})[name];return m!=null?m:0;}
 
 /* ===== Supabase (toggle via localStorage.DASHBOARD_DB = 'prod' | 'test') ===== */
