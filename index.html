@@ -1923,22 +1923,26 @@ function VoiceFloat({tasks}){
     const proj=task.project||'其他';
     const projLabel=proj==='其他'?'其他项目':proj;
     const tid=Date.now();
+    const requestCode='QR-FE-'+tid;
     const _recruitKW=['招生','招人','学生','辅导师','招聘','招募'];
     const _isRecruitTask=_recruitKW.some(kw=>(task.title||'').includes(kw)||(task.description||'').includes(kw));
     const _numM=(task.title||'').match(/(\d+)/);
     const _targetN=_isRecruitTask&&_numM?parseInt(_numM[1]):0;
 
-    // Optimistic local kanban row so the boss sees the card immediately. The 15s
-    // poll (Stage D will replace this with /api/tasks) will reconcile to canonical.
-    const localRow={id:tid,name:task.title||'',assignee,deadline:task.deadline||null,priority:task.priority||'mid',status:'in-progress',blocker:'',files:[],notes:task.description||'',project:proj==='其他'?null:proj,createdAt:(task.deadline||new Date().toISOString().split('T')[0])};
+    // Optimistic local kanban row. Use request_code as the React key — /api/tasks GET
+    // returns the same id (no metadata.dashboard_id since legacy mirror was removed),
+    // so the row matches itself across the 15s refetch instead of getting replaced
+    // (which would visually "blink" the card).
+    const localRow={id:requestCode,request_code:requestCode,name:task.title||'',assignee,deadline:task.deadline||null,priority:task.priority||'mid',status:'in-progress',blocker:'',files:[],notes:task.description||'',project:proj==='其他'?null:proj,createdAt:(task.deadline||new Date().toISOString().split('T')[0])};
+    _RC_CACHE.set(String(requestCode),requestCode);
     window.dispatchEvent(new CustomEvent('walle_task_created',{detail:localRow}));
 
-    // 韩笑+吴晓磊 协同任务：保留可视化双卡片，但同样走 bridge（不触发第二次 Telegram 派单）。
+    // 韩笑+吴晓磊 协同任务：可视化双卡片，副任务也走 bridge（不触发第二次 Telegram 派单）。
     const RECRUIT_KW=['招生','招人','学生','辅导师','辅导'];
     const isRecruit=RECRUIT_KW.some(kw=>(task.title||'').includes(kw)||(task.description||'').includes(kw));
     if(isRecruit&&assignee==='韩笑'){
       const coworker='吴晓磊';
-      bridgeFetch('/api/tasks',{method:'POST',body:{
+      const coRes=await bridgeFetch('/api/tasks',{method:'POST',body:{
         target_name:coworker,
         title:task.title||'',
         content:task.title||'',
@@ -1947,7 +1951,8 @@ function VoiceFloat({tasks}){
         project:proj==='其他'?null:proj,
         notes:'协同韩笑：'+(task.description||''),
       }});
-      const coLocalRow={...localRow,id:tid+1,assignee:coworker,notes:'协同韩笑：'+(task.description||'')};
+      const coRC=(coRes.ok && coRes.data && coRes.data.request_code) || (requestCode+'-co');
+      const coLocalRow={...localRow,id:coRC,request_code:coRC,assignee:coworker,notes:'协同韩笑：'+(task.description||'')};
       window.dispatchEvent(new CustomEvent('walle_task_created',{detail:coLocalRow}));
     }
 
