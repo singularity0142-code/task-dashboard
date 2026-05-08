@@ -688,7 +688,7 @@ const {useState,useEffect,useRef}=React;
 // localhost / 127.0.0.1 / 0.0.0.0 / file:// origins.
 const _LOCAL_HOSTS=new Set(['localhost','127.0.0.1','0.0.0.0','']);
 const _IS_LOCAL=_LOCAL_HOSTS.has(window.location.hostname||'');
-const BRIDGE_URL=(localStorage.getItem('QIDIAN_BRIDGE_URL')||window.QIDIAN_BRIDGE_URL||(_IS_LOCAL?'http://127.0.0.1:8789':'http://35.79.2.111/qidian-test')).replace(/\/$/,'');
+const BRIDGE_URL=(localStorage.getItem('QIDIAN_BRIDGE_URL')||window.QIDIAN_BRIDGE_URL||(_IS_LOCAL?'http://127.0.0.1:8789':'https://35.79.2.111/qidian-test')).replace(/\/$/,'');
 console.log('[dashboard] BRIDGE_URL='+BRIDGE_URL);
 function getPT(name){const m=(window.__ptMap||{})[name];return m!=null?m:0;}
 
