@@ -104,15 +104,15 @@ body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;
 <div id="root"></div>
 <script type="text/babel">
 const {useState,useEffect,useCallback}=React;
-// Same auto-detect as index.html: local dev points at 127.0.0.1:8788 for sim panel.
+// Same auto-detect as index.html: local dev points at 127.0.0.1:8789 (test bridge).
 const _LOCAL_HOSTS=new Set(['localhost','127.0.0.1','0.0.0.0','']);
 const _IS_LOCAL=_LOCAL_HOSTS.has(window.location.hostname||'');
-const BRIDGE_URL=(localStorage.getItem('QIDIAN_BRIDGE_URL')||window.QIDIAN_BRIDGE_URL||(_IS_LOCAL?'http://127.0.0.1:8788':'https://35.79.2.111/qidian')).replace(/\/$/,'');
+const BRIDGE_URL=(localStorage.getItem('QIDIAN_BRIDGE_URL')||window.QIDIAN_BRIDGE_URL||(_IS_LOCAL?'http://127.0.0.1:8789':'https://35.79.2.111/qidian')).replace(/\/$/,'');
 
 // Stage D.2 — cmd.html reads/writes go through bridge HTTP. Direct SB client is
 // vestigial (no live SB.from() callsites left) but kept until a separate cleanup
-// pass since other modules may import it. Default prod; opt-in test via
-// localStorage.DASHBOARD_DB='test'.
+// pass since other modules may import it. Test branch defaults to test bed;
+// opt-in prod via localStorage.DASHBOARD_DB='prod'.
 const _DB_CFG={
   prod:{
     url:'https://nkkbvhtmlooverkhyqsa.supabase.co',
@@ -123,7 +123,7 @@ const _DB_CFG={
     key:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxxeXh2YmhpZGtoYWFpbnJ1enVrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3Mjc2MDMsImV4cCI6MjA5MzMwMzYwM30.phFXLNwx6KDC2-zzQZrTYStyTmy7YLNdJVmh03UyW8o',
   },
 };
-const _DB_MODE=(localStorage.getItem('DASHBOARD_DB')||'prod').toLowerCase()==='test'?'test':'prod';
+const _DB_MODE=(localStorage.getItem('DASHBOARD_DB')||'test').toLowerCase()==='prod'?'prod':'test';
 const SURL=_DB_CFG[_DB_MODE].url;
 const SKEY=_DB_CFG[_DB_MODE].key;
 const SB=supabase.createClient(SURL,SKEY);
