@@ -2618,19 +2618,20 @@ function OrgBranch({m,all,onTg}){
 function OrgPage(){
   const [mbrs,setMbrs]=useState(()=>ORG.map(m=>({...m,tgSt:'none'})));
   useEffect(()=>{
-    SB.from('org_members').select('*').then(({data})=>{
+    bridgeFetch('/api/org-members').then(r=>{
+      const data=r&&r.members;
       if(data&&data.length>0) setMbrs(prev=>prev.map(m=>{
-        const r=data.find(d=>d.id===m.id);
-        return r?{...m,tgSt:r.tg_status||'none'}:m;
+        const rr=data.find(d=>d.id===m.id);
+        return rr?{...m,tgSt:rr.tg_status||'none'}:m;
       }));
-    });
+    }).catch(()=>{});
   },[]);
 
   const toggleTg=id=>setMbrs(p=>p.map(m=>{
     if(m.id!==id)return m;
     const i=(TGS.indexOf(m.tgSt||'none')+1)%TGS.length;
     const ns=TGS[i];
-    SB.from('org_members').upsert({id:m.id,tg_status:ns});
+    bridgeFetch('/api/org-members/'+encodeURIComponent(m.id),{method:'PATCH',body:{tg_status:ns}}).catch(()=>{});
     return{...m,tgSt:ns};
   }));
 
