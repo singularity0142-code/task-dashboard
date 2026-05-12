@@ -2386,96 +2386,11 @@ function ProjectBody({proj,persons,bossTasks,openPerson,setOpenPerson,statusDot,
   );
 }
 
-/* ===== Project Finance Inline (drawer — 实时从 Supabase 读取) ===== */
-function ProjectFinanceInline({proj}){
-  const [records,setRecords]=useState(null); // null=loading, []=empty
-  const [err,setErr]=useState(null);
-
-  const load=()=>{
-    setErr(null);
-    SB.from('finance_records')
-      .select('*')
-      .eq('project',proj)
-      .order('created_at',{ascending:false})
-      .limit(50)
-      .then(({data,error})=>{
-        if(error){setErr('数据加载失败');setRecords([]);}
-        else setRecords(data||[]);
-      });
-  };
-  useEffect(()=>{
-    load();
-    const t=setInterval(load,30000);
-    return()=>clearInterval(t);
-  },[proj]);
-
-  if(records===null) return <div style={{padding:'24px',textAlign:'center',color:'#9CA3AF',fontSize:'.8rem'}}>⏳ 加载中...</div>;
-
-  const income=records.filter(r=>r.type==='income').reduce((s,r)=>s+(Number(r.amount)||0),0);
-  const expense=records.filter(r=>r.type==='expense').reduce((s,r)=>s+(Number(r.amount)||0),0);
-  const net=income-expense;
-  const fmt=n=>n>=10000?(n/10000).toFixed(1)+'万':n.toLocaleString();
-
-  if(records.length===0) return(
-    <div style={{padding:'28px 16px',textAlign:'center'}}>
-      <div style={{fontSize:'2rem',marginBottom:8}}>💰</div>
-      <div style={{color:'#6B7280',fontSize:'.82rem',fontWeight:600}}>暂无财务记录</div>
-      <div style={{color:'#9CA3AF',fontSize:'.7rem',marginTop:4}}>成员向奇点汇报收支后，数据将自动录入</div>
-    </div>
-  );
-
-  const kpis=[
-    {icon:'📈',label:'总收入',val:'¥'+fmt(income),cls:'green',color:'#16A34A'},
-    {icon:'📉',label:'总支出',val:'¥'+fmt(expense),cls:'red',color:'#DC2626'},
-    {icon:'💎',label:'净收益',val:(net>=0?'+':'')+'¥'+fmt(Math.abs(net)),cls:net>=0?'blue':'red',color:net>=0?'#1D4ED8':'#DC2626'},
-    {icon:'📑',label:'记录条数',val:records.length+'条',cls:'amber',color:'#92400E'},
-  ];
-
-  const typeIcon=t=>t==='income'?{icon:'💰',bg:'#F0FDF4'}:{icon:'💸',bg:'#FFF7F7'};
-
-  return(
-    <div style={{padding:'12px 14px'}}>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:8,marginBottom:12}}>
-        {kpis.map((k,i)=>(
-          <div key={i} className={`fin-kpi ${k.cls}`} style={{padding:'10px 12px',borderRadius:12}}>
-            <div style={{fontSize:'.85rem'}}>{k.icon}</div>
-            <div style={{fontSize:'1rem',fontWeight:800,color:k.color,lineHeight:1.1,margin:'2px 0'}}>{k.val}</div>
-            <div style={{fontSize:'.6rem',color:'#9CA3AF'}}>{k.label}</div>
-          </div>
-        ))}
-      </div>
-      <div style={{background:'#fff',borderRadius:12,padding:'10px 12px',boxShadow:'0 1px 6px rgba(0,0,0,.05)'}}>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
-          <div style={{fontSize:'.72rem',fontWeight:700,color:'#111827'}}>🧾 流水明细</div>
-          <button onClick={load} style={{fontSize:'.6rem',color:'#6B7280',background:'none',border:'none',cursor:'pointer'}}>↻ 刷新</button>
-        </div>
-        {err&&<div style={{color:'#DC2626',fontSize:'.7rem',textAlign:'center',padding:8}}>{err}</div>}
-        {records.map((r,i)=>{
-          const ti=typeIcon(r.type);
-          const dt=r.created_at?new Date(r.created_at).toLocaleDateString('zh-CN'):'';
-          return(
-            <div key={r.id||i} className="fin-tx" style={{padding:'7px 0'}}>
-              <div className="fin-tx-icon" style={{background:ti.bg,width:28,height:28,borderRadius:8,fontSize:'.85rem'}}>{ti.icon}</div>
-              <div className="fin-tx-info">
-                <div style={{fontSize:'.72rem',fontWeight:600,color:'#111827'}}>{r.category||r.note||'—'}</div>
-                <div style={{fontSize:'.6rem',color:'#9CA3AF'}}>{dt}{r.reporter?' · '+r.reporter:''}</div>
-              </div>
-              <div style={{fontSize:'.76rem',fontWeight:700,color:r.type==='income'?'#16A34A':'#DC2626',whiteSpace:'nowrap'}}>
-                {r.type==='income'?'+':'-'}¥{fmt(Number(r.amount)||0)}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 /* ===== Task Drawer ===== */
 function TaskDrawer({tasks,bossTasks=[],filter,onClose,onEdit,onDelete}){
   const [openProj,setOpenProj]=useState(new Set()); // 默认全收起，点击才展开
   const [openPerson,setOpenPerson]=useState(null); // 展开的人员key "项目|姓名"
-  const [openSection,setOpenSection]=useState({}); // {proj: 'org'|'finance'|'progress'|null}
+  const [openSection,setOpenSection]=useState({}); // {proj: 'org'|'progress'|null}
   const toggleSection=(proj,sec)=>setOpenSection(p=>({...p,[proj]:p[proj]===sec?null:sec}));
 
   const titleMap={all:'全部任务',completed:'已完成','in-progress':'进行中',blocked:'已卡点',overdue:'逾期中'};
@@ -2568,7 +2483,7 @@ function TaskDrawer({tasks,bossTasks=[],filter,onClose,onEdit,onDelete}){
                 </div>
                 {isOpen&&(
                   <div>
-                    {[{sec:'org',icon:'🏢',label:'项目组织架构'},{sec:'finance',icon:'💰',label:'财务情况'},{sec:'progress',icon:'📊',label:'工作进度'}].map(({sec,icon,label})=>{
+                    {[{sec:'org',icon:'🏢',label:'项目组织架构'},{sec:'progress',icon:'📊',label:'工作进度'}].map(({sec,icon,label})=>{
                       const isSecOpen=openSection[proj]===sec;
                       return(
                         <div key={sec}>
@@ -2580,7 +2495,6 @@ function TaskDrawer({tasks,bossTasks=[],filter,onClose,onEdit,onDelete}){
                           {isSecOpen&&(
                             <div className="proj-sub-body">
                               {sec==='org'&&React.createElement(ProjectBody,{proj,persons,bossTasks,openPerson,setOpenPerson,statusDot,buildLog,S,onEdit,onDelete,section:'org'})}
-                              {sec==='finance'&&React.createElement(ProjectFinanceInline,{proj})}
                               {sec==='progress'&&React.createElement(ProjectBody,{proj,persons,bossTasks,openPerson,setOpenPerson,statusDot,buildLog,S,onEdit,onDelete,section:'progress'})}
                             </div>
                           )}
@@ -2811,11 +2725,6 @@ function HomePage({tasks,onNav}){
           <div className="home-nav-label">任务看板</div>
           <div className="home-nav-sub">任务追踪 · 进度管理</div>
         </div>
-        <div className="home-nav-card c2" onClick={()=>onNav('finance')}>
-          <div className="home-nav-icon">💰</div>
-          <div className="home-nav-label">财务看板</div>
-          <div className="home-nav-sub">营收 · 支出 · 利润</div>
-        </div>
         <div className="home-nav-card c3" onClick={()=>onNav('org')}>
           <div className="home-nav-icon">⚔</div>
           <div className="home-nav-label">战队图谱</div>
@@ -2831,87 +2740,6 @@ function HomePage({tasks,onNav}){
           <div className="home-nav-label">龙虎榜</div>
           <div className="home-nav-sub">PT积分排名</div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-/* ===== Finance Page ===== */
-function FinancePage({onBack}){
-  const [records,setRecords]=useState(null);
-  const [filterProj,setFilterProj]=useState('all');
-
-  const load=()=>{
-    let q=SB.from('finance_records').select('*').order('created_at',{ascending:false}).limit(200);
-    setRecords(null);
-    q.then(({data,error})=>setRecords(error?[]:data||[]));
-  };
-  useEffect(()=>{load();},[]);
-
-  const fmt=n=>n>=10000?(n/10000).toFixed(1)+'万':n.toLocaleString();
-  const display=records===null?[]:filterProj==='all'?records:records.filter(r=>r.project===filterProj);
-  const income=display.filter(r=>r.type==='income').reduce((s,r)=>s+(Number(r.amount)||0),0);
-  const expense=display.filter(r=>r.type==='expense').reduce((s,r)=>s+(Number(r.amount)||0),0);
-  const net=income-expense;
-
-  const kpis=[
-    {icon:'📈',label:'总收入',val:records===null?'…':'¥'+fmt(income),cls:'green'},
-    {icon:'📉',label:'总支出',val:records===null?'…':'¥'+fmt(expense),cls:'red'},
-    {icon:'💎',label:'净收益',val:records===null?'…':(net>=0?'+':'')+fmt(net),cls:net>=0?'blue':'red'},
-    {icon:'📑',label:'记录条数',val:records===null?'…':display.length+'条',cls:'amber'},
-  ];
-
-  return(
-    <div className="fin-page">
-      <div className="fin-topbar">
-        <button className="fin-back" onClick={onBack}>← 返回</button>
-        <div className="fin-hdr-title">💰 财务看板</div>
-        <button onClick={load} style={{background:'none',border:'none',fontSize:'.8rem',cursor:'pointer',color:'#6B7280'}}>↻</button>
-      </div>
-      {/* 项目筛选 */}
-      <div style={{display:'flex',gap:8,padding:'10px 16px 0',flexWrap:'wrap'}}>
-        {['all',...PROJECTS,'其他'].map(p=>(
-          <button key={p} onClick={()=>setFilterProj(p)} style={{padding:'4px 12px',borderRadius:99,border:'1.5px solid',fontSize:'.7rem',fontWeight:700,cursor:'pointer',borderColor:filterProj===p?'#22C55E':'#E5E7EB',background:filterProj===p?'#22C55E':'#fff',color:filterProj===p?'#fff':'#374151'}}>
-            {p==='all'?'全部项目':p}
-          </button>
-        ))}
-      </div>
-      <div className="fin-kpis" style={{marginTop:12}}>
-        {kpis.map((k,i)=>(
-          <div key={i} className={`fin-kpi ${k.cls}`}>
-            <div className="fin-kpi-icon">{k.icon}</div>
-            <div className="fin-kpi-val">{k.val}</div>
-            <div className="fin-kpi-label">{k.label}</div>
-          </div>
-        ))}
-      </div>
-      <div className="fin-card">
-        <div className="fin-card-title">🧾 流水明细</div>
-        {records===null&&<div style={{textAlign:'center',padding:'20px 0',color:'#9CA3AF',fontSize:'.8rem'}}>⏳ 加载中...</div>}
-        {records!==null&&display.length===0&&(
-          <div style={{textAlign:'center',padding:'32px 0'}}>
-            <div style={{fontSize:'2.5rem',marginBottom:10}}>💰</div>
-            <div style={{color:'#6B7280',fontSize:'.85rem',fontWeight:600}}>暂无财务记录</div>
-            <div style={{color:'#9CA3AF',fontSize:'.72rem',marginTop:6,lineHeight:1.6}}>
-              成员向奇点汇报收支后，数据将自动录入<br/>
-              例：「理享招生1人，收入5000，差旅报1000」
-            </div>
-          </div>
-        )}
-        {display.map((r,i)=>{
-          const isInc=r.type==='income';
-          const dt=r.created_at?new Date(r.created_at).toLocaleDateString('zh-CN'):'';
-          return(
-            <div key={r.id||i} className="fin-tx">
-              <div className="fin-tx-icon" style={{background:isInc?'#F0FDF4':'#FFF7F7'}}>{isInc?'💰':'💸'}</div>
-              <div className="fin-tx-info">
-                <div className="fin-tx-name">{r.category||r.note||'—'}{r.project&&<span style={{marginLeft:6,fontSize:'.6rem',color:'#9CA3AF'}}>#{r.project}</span>}</div>
-                <div className="fin-tx-date">{dt}{r.reporter?' · '+r.reporter:''}{r.note&&r.category?' · '+r.note:''}</div>
-              </div>
-              <div className={`fin-tx-amount ${isInc?'inc':'exp'}`}>{isInc?'+':'-'}¥{(Number(r.amount)||0).toLocaleString()}</div>
-            </div>
-          );
-        })}
       </div>
     </div>
   );
@@ -3252,8 +3080,6 @@ function App(){
   // remaining text-display callsites keep working until E removes them.
   // New-reply notifications are now driven by D.3's /api/messages poll, not by
   // observing description-length deltas.
-  const lastFinIdRef=useRef(0);     // 上次已见 finance_record id (still SB-direct; finance migration is a future stage)
-
   useEffect(()=>{
     const fetchBT=async()=>{
       // Stage D.4 + D.5 — fetch tasks AND recent message events in parallel; attach
@@ -3290,26 +3116,8 @@ function App(){
       setBossTasks(rows);
     };
 
-    const fetchFin=()=>{
-      const since=lastFinIdRef.current;
-      if(!since) return;
-      SB.from('finance_records').select('*').gt('id',since).order('id',{ascending:true}).limit(10).then(({data})=>{
-        if(!data||data.length===0) return;
-        data.forEach(r=>{
-          const sign=r.type==='income'?'+':'-';
-          const amt=r.amount>0?` ${sign}¥${r.amount}`:'';
-          setToast(`💰 ${r.reporter||''}：${r.category}${amt}`);
-        });
-        lastFinIdRef.current=data[data.length-1].id;
-      });
-    };
-
-    SB.from('finance_records').select('id').order('id',{ascending:false}).limit(1).then(({data})=>{
-      if(data&&data.length>0) lastFinIdRef.current=data[0].id;
-    });
-
     fetchBT();
-    const timer=setInterval(()=>{fetchBT();fetchFin();},15000);
+    const timer=setInterval(()=>{fetchBT();},15000);
     const onAck=()=>fetchBT();
     window.addEventListener('boss_task_acked',onAck);
     return()=>{clearInterval(timer);window.removeEventListener('boss_task_acked',onAck);};
@@ -3452,7 +3260,6 @@ function App(){
 
   if(page==='leaderboard') return <><LeaderboardPage onBack={()=>setPage('home')}/>{toast&&<Toast msg={toast} onClose={()=>setToast(null)}/>}</>;
   if(page==='home') return <><HomePage tasks={tasks} onNav={setPage}/><VoiceFloat tasks={tasks}/>{toast&&<Toast msg={toast} onClose={()=>setToast(null)}/>}</>;
-  if(page==='finance') return <><FinancePage onBack={()=>setPage('home')}/><Avatar tasks={tasks}/><VoiceFloat tasks={tasks}/>{toast&&<Toast msg={toast} onClose={()=>setToast(null)}/>}</>;
   if(page==='unknown') return <><ThinkingPage onBack={()=>setPage('home')}/>{toast&&<Toast msg={toast} onClose={()=>setToast(null)}/>}</>;
 
   return(
